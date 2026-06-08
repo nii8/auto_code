@@ -1,6 +1,6 @@
 # AIOS 使用说明
 
-> AIOS 是一套用于复杂项目的 AI 协作操作系统模板。它通过配置文件、方法论文档、经验库、Python 工具和 `.aios/` 工作目录，把“聊天驱动”升级为“流程驱动”。
+> AIOS 是一套用于复杂项目的 AI 协作操作系统模板。它通过配置文件、方法论文档、Python 工具和 `.aios/` 工作目录，把“聊天驱动”升级为“流程驱动”。经验库是可选扩展，不是初始项目必需组件。
 
 ## 一、目录结构
 
@@ -13,7 +13,7 @@ aios_docs/
   AI项目操作系统落地架构.md           Python / Codex / LLM 落地架构
   AI项目操作系统项目设计.md           项目初始化设计
   tools/                            固定工具脚本
-  experience/                       跨项目经验库
+  experience/                       可选：跨项目经验库，初始项目可不存在
 ```
 
 ## 二、每个文件的作用
@@ -26,7 +26,8 @@ aios_docs/
 
 ```text
 先读配置
-再读方法论和经验库
+再读方法论
+如果经验库存在则按需读取
 再读原始材料
 再扫描源码
 先生成证据草案和候选目标
@@ -68,17 +69,11 @@ state_manager.py   管理 .aios/state.json
 
 ### `experience/`
 
-跨项目经验库，越用越有价值。
+可选的跨项目经验库。
 
-不要因为换项目就删除。
+初始项目可以没有 `experience/` 目录，也可以是空目录；没有经验库时，AIOS 直接跳过经验加载，不影响启动。
 
-经验分三类：
-
-```text
-A 类：强通用经验，启动时作为候选加载，让用户确认
-B 类：领域经验，按项目领域需要再读取
-C 类：项目特定经验，按源码/项目匹配度需要再读取
-```
+只有当项目运行或复盘后确实沉淀了可复用内容，才需要创建经验库。经验只能作为候选参考，不能替代当前项目的目标确认和逐层冻结。
 
 ## 三、第一次使用步骤
 
@@ -115,7 +110,7 @@ initial_goal_hint: "可选，一句话描述当前想做什么"
 ```text
 读取配置
 读取方法论
-读取 A 类候选经验
+如果经验库存在，读取候选经验；如果不存在则跳过
 读取原始材料
 扫描源码目录
 生成证据草案
@@ -257,23 +252,15 @@ mv <source_code_dir>/.aios <source_code_dir>/.aios_archive_YYYYMMDD
 ```text
 aios_docs/
 aios_docs/tools/
-aios_docs/experience/
 AI项目操作系统总控入口.md
 AI项目操作系统方法论.md
 AI项目操作系统落地架构.md
 AI项目操作系统项目设计.md
 ```
 
-这些是模板、工具和经验库。
+这些是 AIOS 模板和工具。
 
-尤其不要删：
-
-```text
-aios_docs/experience/
-```
-
-经验库是跨项目资产，越用越有价值。
-
+`aios_docs/experience/` 是可选经验库：初始项目可以没有；只有里面已经沉淀了用户明确要保留的跨项目经验时，才需要保留。
 ## 七、哪些东西可以删或重建
 
 可以删或重建：
@@ -290,53 +277,25 @@ aios_docs/experience/
 
 ## 八、经验库怎么用
 
-启动时只默认读取：
+经验库是可选扩展。
+
+启动时按这个规则处理：
 
 ```text
-experience/README.md
-experience/经验适用性判断规则.md
-experience/通用经验.md
+如果 aios_docs/experience/ 不存在：跳过经验加载。
+如果 aios_docs/experience/ 存在但为空：跳过经验加载。
+如果 aios_docs/experience/ 存在且有文件：只把经验作为候选参考，先说明适用场景，再让用户确认是否启用。
 ```
 
-A 类强通用经验会形成候选加载清单，让用户选择是否加载。
+初始项目不应该预置具体经验。经验应该来自后续真实项目运行、失败教训、复盘或用户明确要求保存的规则。
 
-B 类领域经验不默认加载，例如：
-
-```text
-experience/领域经验.md
-```
-
-只有当前项目属于对应领域，或用户要求时才读取。
-
-C 类项目特定经验不默认加载，例如：
+经验不能用于：
 
 ```text
-experience/项目特定经验.md
-```
-
-只有源码、项目名、路径、业务上下文高度匹配时才读取。
-
-项目结束或阶段结束时，可以把复用价值高的经验写入：
-
-```text
-experience/通用经验.md
-experience/领域经验.md
-experience/项目特定经验.md
-experience/失败教训.md
-experience/提示词经验.md
-experience/检查规则经验.md
-experience/工具经验.md
-```
-
-写入经验前必须补全：
-
-```text
-经验等级
-适用场景
-不适用场景
-置信度
-是否可能过期
-过期检查方式
+替用户决定目标
+跳过逐层确认
+把旧项目规则强加到新项目
+绕过当前项目证据和用户确认
 ```
 
 ## 九、常用命令
@@ -380,7 +339,7 @@ python3 aios_docs/tools/state_manager.py --config aios_docs/aios_config.yaml sho
 ## 十、最重要原则
 
 ```text
-aios_docs/ 是固定模板、工具和经验库。
+aios_docs/ 是固定模板和工具；经验库是可选扩展。
 aios_config.yaml 是每次项目启动前要改的配置。
 <source_code_dir>/.aios/ 是某个具体项目的运行状态。
 ```
@@ -390,6 +349,6 @@ aios_config.yaml 是每次项目启动前要改的配置。
 ```text
 改 aios_config.yaml
 不要删 aios_docs
-不要删 experience
+如果 experience 存在且有用户确认保留的经验，不要误删
 必要时删除或归档旧项目的 .aios
 ```
