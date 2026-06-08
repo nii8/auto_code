@@ -1,0 +1,54 @@
+# AIOS 启动配置
+# 用户启动前优先修改这个文件。
+
+# 必填：真实源码项目目录。可以是绝对路径，也可以是相对路径。
+# 示例：/home/admin/claude/sp_v3/split_video/mini/sp_video
+source_code_dir: ""
+
+# 必填：原始项目材料文件。可以是聊天记录、会议纪要、录音转写、需求长文等纯文本 / Markdown 文件。
+# 示例：aios_docs/你的原始材料.md
+source_material_file: ""
+
+# 可选：当前阶段一句话目标提示。不是最终目标，只是帮助 AI 生成候选目标。
+# 示例：稳定短视频智能剪辑流程，优先跑通 2 个短视频样例。
+initial_goal_hint: ""
+
+# 固定策略：AIOS 工作目录固定创建在源码目录下的 .aios。
+# 不需要用户填写，程序会根据 source_code_dir 自动得到：<source_code_dir>/.aios
+aios_work_dir_policy: "source_code_dir/.aios"
+
+# 固定策略：第一轮只做项目初始化。
+# 可以读取源码；不修改源码；不调用 Codex/LLM 自动执行生产任务。
+first_round_policy:
+  allow_read_source: true
+  allow_modify_source: false
+  allow_execute_tasks: false
+
+# LLM 配置：用于后续 Python 调用大模型。不要把 API Key 写在这里，API Key 从环境变量读取。
+llm:
+  provider: "openai_compatible"
+  model: "qwen3.6-plus"
+  base_url: "https://coding.dashscope.aliyuncs.com/v1"
+  api_key_env: "OPENAI_API_KEY"
+  temperature: 0.2
+  timeout_seconds: 300
+
+# Codex 配置：用于后续 Python 调用 Codex CLI。
+codex:
+  command: "codex"
+  default_args:
+    - "exec"
+    - "--json"
+    - "--sandbox"
+    - "workspace-write"
+  timeout_seconds: 3600
+
+# 自动化刹车：防止无限循环。
+limits:
+  max_total_steps: 20
+  max_repair_attempts: 3
+  max_depth: 4
+  max_runtime_minutes: 60
+  
+  
+  
