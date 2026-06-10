@@ -18,12 +18,15 @@ aios_docs/aios_config.yaml
 aios_docs/aios_config.local.yaml
 ```
 
-`aios_config.local.yaml` 用来保存当前机器的真实源码目录和原始材料路径，不提交 Git。用户不需要手动改 YAML；如果缺路径，AI 应在对话里询问并自动写入本地配置。
+`aios_config.local.yaml` 用来保存当前机器的真实项目模式、源码目录和原始材料路径，不提交 Git。用户不需要手动改 YAML；如果缺项目模式或路径，AI 应在对话里询问并自动写入本地配置。
 
 里面最重要的参数是：
 
 ```text
-source_code_dir       源码目录
+project_mode          项目模式：greenfield / brownfield / rebuild
+target_source_dir     可写目标源码目录；rebuild 时是新项目目录
+source_code_dir       兼容字段，通常等于 target_source_dir
+reference_source_dirs 只读参考源码目录；rebuild 时是旧项目目录
 source_material_file  原始项目材料文件
 initial_goal_hint     当前阶段目标提示，可空
 ```
@@ -47,7 +50,7 @@ AIOS 工作目录固定创建在：
 
 ## 1.5 项目模式和路径角色
 
-AIOS 启动时需要识别项目模式：
+AIOS 启动时必须先识别项目模式，不能因为模板里有默认值就替用户选择模式：
 
 ```text
 greenfield：全新项目。
@@ -55,7 +58,15 @@ brownfield：在现有项目上修改。
 rebuild：旧项目只读参考，新项目从零重构。
 ```
 
-rebuild 模式下必须询问并写入本地配置：
+各模式路径角色：
+
+```text
+greenfield：询问 target_source_dir/source_code_dir 作为全新可写项目目录，询问 source_material_file。
+brownfield：询问 target_source_dir/source_code_dir 作为现有可写项目目录，询问 source_material_file。
+rebuild：询问 target_source_dir/source_code_dir 作为新项目可写目录，询问 reference_source_dirs 作为旧项目只读目录，询问 source_material_file。
+```
+
+rebuild 模式下必须写入本地配置：
 
 ```text
 target_source_dir：新项目目录，可写。
@@ -72,10 +83,23 @@ AI 启动后必须先做参数检查：
 ```text
 1. 读取本文件。
 2. 读取 `aios_docs/aios_config.yaml`，再合并 `aios_docs/aios_config.local.yaml`。
-3. 如果 `source_code_dir` 为空，询问用户源码目录在哪里，并写入本地配置。
-4. 如果 `source_material_file` 为空，询问用户原始材料文件在哪里，并写入本地配置。
-5. 在 `source_code_dir` 下创建 `.aios/` 工作目录。
-6. 确认路径存在后，再继续。
+3. 如果 `project_mode` 为空或不是 greenfield/brownfield/rebuild，先询问用户项目模式。
+4. 根据项目模式询问路径角色，不能只问“源码目录在哪里”。
+5. 如果是 rebuild，必须分别询问“新项目可写目录”和“旧项目只读参考目录”。
+6. 如果 `source_material_file` 为空，询问用户原始材料 / 聊天记录文件在哪里。
+7. 把用户回答写入 `aios_docs/aios_config.local.yaml`。
+8. 在 `target_source_dir/source_code_dir` 下创建 `.aios/` 工作目录。
+9. 确认路径存在后，再继续。
+```
+
+推荐首轮询问话术：
+
+```text
+我需要先绑定本机项目，不需要你手动改 YAML。请告诉我：
+1. 项目模式是 greenfield、brownfield 还是 rebuild？
+2. 可写目标项目目录在哪里？
+3. 原始材料 / 聊天记录文件在哪里？
+4. 如果是 rebuild：旧项目源码目录在哪里？旧项目只作为只读参考。
 ```
 
 不要要求用户复制文件；本目录已经是 AIOS 启动目录。

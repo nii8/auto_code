@@ -71,11 +71,14 @@ def load_aios_config() -> dict[str, Any]:
 def missing_config_fields() -> list[str]:
     config = load_aios_config()
     missing = []
+    project_mode = str(config.get("project_mode", "")).strip()
+    if project_mode not in {"greenfield", "brownfield", "rebuild"}:
+        missing.append("project_mode")
     if not str(config.get("target_source_dir") or config.get("source_code_dir") or "").strip():
         missing.append("target_source_dir/source_code_dir")
     if not str(config.get("source_material_file", "")).strip():
         missing.append("source_material_file")
-    if str(config.get("project_mode", "")).strip() == "rebuild" and not config.get("reference_source_dirs"):
+    if project_mode == "rebuild" and not config.get("reference_source_dirs"):
         missing.append("reference_source_dirs")
     return missing
 
@@ -86,8 +89,10 @@ def print_setup_help(raw: str | None = None) -> None:
     if missing:
         print(f"- 缺少配置：{', '.join(missing)}")
     print("- 不需要修改可提交的 `aios_docs/aios_config.yaml`。")
-    print("- 请在对话里告诉 Codex：项目模式、可写新项目目录、原始材料/聊天记录在哪里。")
-    print("- 如果是重构项目，还要告诉 Codex：旧项目源码目录在哪里；旧项目只读参考。")
+    print("- 请先在对话里告诉 Codex：项目模式 greenfield/brownfield/rebuild。")
+    print("- greenfield：需要可写新项目目录、原始材料/聊天记录。")
+    print("- brownfield：需要现有可写源码目录、原始材料/聊天记录。")
+    print("- rebuild：需要可写新项目目录、旧项目只读源码目录、原始材料/聊天记录。")
     print("- Codex 会把真实路径写入 `aios_docs/aios_config.local.yaml`，该文件不会提交 Git。")
     print("- 也可以参考 `aios_docs/aios_config.local.example.yaml` 手动创建本地配置。")
     if raw and "Traceback" not in raw:

@@ -37,16 +37,16 @@ def run_codex(prompt: str, cwd: str | Path, config: dict[str, Any]) -> dict[str,
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Codex CLI")
     parser.add_argument("--config", default=None, help="Path to aios_config.yaml")
-    parser.add_argument("--cwd", help="Codex working directory. Defaults to source_code_dir")
+    parser.add_argument("--cwd", help="Codex working directory. Defaults to target_source_dir/source_code_dir")
     parser.add_argument("--prompt-file", help="Read prompt from file")
     parser.add_argument("--out", help="Write JSON result to file")
     parser.add_argument("prompt", nargs="?", help="Prompt text. If omitted, stdin is used.")
     args = parser.parse_args()
 
     config = load_config(args.config) if args.config else load_config()
-    cwd = args.cwd or config.get("source_code_dir")
+    cwd = args.cwd or config.get("target_source_dir") or config.get("source_code_dir")
     if not cwd:
-        raise SystemExit("source_code_dir is empty; pass --cwd or fill aios_config.yaml")
+        raise SystemExit("target_source_dir/source_code_dir is empty; pass --cwd or fill aios_config.local.yaml")
 
     if args.prompt_file:
         prompt = Path(args.prompt_file).read_text(encoding="utf-8")

@@ -95,7 +95,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
         data["source_code_dir"] = target_source_dir
     elif source_code_dir and not target_source_dir:
         data["target_source_dir"] = source_code_dir
-    data.setdefault("project_mode", "greenfield")
+    data.setdefault("project_mode", "")
     data.setdefault("reference_source_dirs", [])
     data["_config_path"] = str(config_path)
     return data

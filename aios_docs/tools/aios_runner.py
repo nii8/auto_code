@@ -210,7 +210,7 @@ def read_if_exists(path: Path, max_chars: int = 12000) -> str:
 def build_prompt(config: dict[str, Any], task: dict[str, Any]) -> str:
     root = source_dir(config)
     refs = reference_source_dirs(config)
-    project_mode = str(config.get("project_mode", "greenfield"))
+    project_mode = str(config.get("project_mode") or "未配置")
     parts = [
         "你是 AIOS 的 Codex Worker。请只执行当前任务，不要改变项目方向。",
         "",

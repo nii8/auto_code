@@ -20,9 +20,9 @@ DEFAULT_STATE = {
 
 
 def aios_dir(config: dict) -> Path:
-    source_code_dir = config.get("source_code_dir")
+    source_code_dir = config.get("target_source_dir") or config.get("source_code_dir")
     if not source_code_dir:
-        raise RuntimeError("source_code_dir is empty in aios_config.yaml")
+        raise RuntimeError("target_source_dir/source_code_dir is empty in aios_config.yaml or aios_config.local.yaml")
     return Path(source_code_dir).expanduser().resolve() / ".aios"
 
 

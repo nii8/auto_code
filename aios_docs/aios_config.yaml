@@ -1,11 +1,11 @@
 # AIOS 启动配置
 # 这是可提交的模板配置。真实项目路径写入 aios_config.local.yaml；该本地文件不提交。
 
-# 项目模式：
+# 项目模式必须由用户在新会话首轮确认；模板不默认替用户选择。
 # - greenfield：全新项目
 # - brownfield：在现有项目上修改
 # - rebuild：旧项目只读参考，新项目从零重构
-project_mode: "greenfield"
+project_mode: ""
 
 # 可写目标源码目录。复杂项目和 rebuild 模式优先填写这个字段。
 target_source_dir: ""

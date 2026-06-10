@@ -55,20 +55,23 @@ Runner 如何执行
 
 ### `aios_config.yaml`
 
-每次换项目主要改这个文件。
+这是可提交模板配置。每次换项目不要反复改这个文件，真实项目路径写入 `aios_config.local.yaml`，该文件不提交 Git。
 
 最重要的字段：
 
 ```yaml
-source_code_dir: ""       # 源码目录
-source_material_file: ""  # 原始材料文件
+project_mode: ""          # 必须由用户首轮确认：greenfield / brownfield / rebuild
+target_source_dir: ""     # 可写目标源码目录；rebuild 时是新项目目录
+source_code_dir: ""       # 兼容字段，通常等于 target_source_dir
+reference_source_dirs: []  # rebuild 时填写旧项目只读参考目录
+source_material_file: ""  # 原始材料 / 聊天记录 / 需求说明
 initial_goal_hint: ""     # 可选，当前阶段目标提示
 ```
 
 AIOS 工作目录固定为：
 
 ```text
-<source_code_dir>/.aios/
+<target_source_dir 或 source_code_dir>/.aios/
 ```
 
 ### `tools/`
@@ -96,23 +99,22 @@ aios_runner.py     通用 AIOS 执行器：读取任务图并调用 Codex Worker
 
 ## 三、第一次使用步骤
 
-### 第 1 步：填写配置
+### 第 1 步：绑定本机项目
 
 打开：
 
 ```text
-aios_docs/aios_config.yaml
+aios_docs/aios_config.local.yaml
 ```
 
-填写：
+如果本地配置不存在，Codex 启动后应在对话里询问并自动写入，不要求用户手动修改可提交模板。需要确认：
 
-```yaml
-source_code_dir: ""
-source_material_file: ""
-initial_goal_hint: "可选，一句话描述当前想做什么"
+```text
+1. 项目模式是 greenfield、brownfield 还是 rebuild？
+2. 可写目标项目目录在哪里？
+3. 原始材料 / 聊天记录文件在哪里？
+4. 如果是 rebuild：旧项目源码目录在哪里？旧项目只作为只读参考。
 ```
-
-如果不填，Codex 启动后会询问你。
 
 ### 第 2 步：启动 Codex
 
@@ -315,18 +317,22 @@ AIOS / Codex Worker 必须遵守：
 
 ## 五、换一个新项目怎么做
 
-### 情况 A：换到另一个源码目录
+### 情况 A：换到另一个项目
 
-只需要修改：
+只需要创建或更新本机动态配置：
 
 ```text
-aios_docs/aios_config.yaml
+aios_docs/aios_config.local.yaml
 ```
 
-改成新的：
+示例：
 
 ```yaml
-source_code_dir: "/新的/源码/目录"
+project_mode: "rebuild"
+target_source_dir: "/新的/可写项目目录"
+source_code_dir: "/新的/可写项目目录"
+reference_source_dirs:
+  - "/旧的/只读参考项目目录"
 source_material_file: "/新的/原始材料.md"
 initial_goal_hint: "新的阶段目标提示，可空"
 ```

@@ -30,12 +30,14 @@
 
 ## 2. 配置缺失时不要让用户改 YAML
 
-如果 `source_code_dir` 或 `source_material_file` 缺失，直接在对话里问：
+如果 `project_mode`、目标源码目录或 `source_material_file` 缺失，直接在对话里问；不要因为模板默认值替用户选择模式，也不要只问“源码目录在哪里”：
 
 ```text
-我需要两个信息：
-1. 源码目录在哪里？
-2. 原始材料 / 聊天记录文件在哪里？
+我需要先绑定本机项目，不需要你手动改 YAML。请告诉我：
+1. 项目模式是 greenfield、brownfield 还是 rebuild？
+2. 可写目标项目目录在哪里？
+3. 原始材料 / 聊天记录文件在哪里？
+4. 如果是 rebuild：旧项目源码目录在哪里？旧项目只作为只读参考。
 ```
 
 用户回答后，Codex 自动写入 `aios_docs/aios_config.local.yaml`。`aios_config.yaml` 是可提交模板，不写真实机器路径；`aios_config.local.yaml` 是本地动态配置，不提交。
