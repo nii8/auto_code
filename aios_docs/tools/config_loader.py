@@ -89,6 +89,14 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
     if local_path.exists():
         data = _deep_merge(data, _yaml_load_file(local_path))
         data["_local_config_path"] = str(local_path)
+    target_source_dir = str(data.get("target_source_dir") or "").strip()
+    source_code_dir = str(data.get("source_code_dir") or "").strip()
+    if target_source_dir and not source_code_dir:
+        data["source_code_dir"] = target_source_dir
+    elif source_code_dir and not target_source_dir:
+        data["target_source_dir"] = source_code_dir
+    data.setdefault("project_mode", "greenfield")
+    data.setdefault("reference_source_dirs", [])
     data["_config_path"] = str(config_path)
     return data
 

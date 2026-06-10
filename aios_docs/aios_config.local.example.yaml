@@ -2,6 +2,21 @@
 # 复制为 aios_config.local.yaml 后填写本机真实路径。
 # aios_config.local.yaml 已被 .gitignore 忽略，不提交 Git。
 
-source_code_dir: "/absolute/path/to/your/source"
-source_material_file: "/absolute/path/to/your/source/user_chat_log.md"
+# greenfield：全新项目
+# brownfield：在现有项目上修改
+# rebuild：旧项目只读参考，新项目从零重构
+project_mode: "rebuild"
+
+# 新项目目录，可写。
+target_source_dir: "/absolute/path/to/new_project"
+
+# 兼容字段，建议和 target_source_dir 保持一致。
+source_code_dir: "/absolute/path/to/new_project"
+
+# 旧项目目录，只读参考。
+reference_source_dirs:
+  - "/absolute/path/to/old_project"
+
+# 聊天记录 / 需求说明 / 原始材料。
+source_material_file: "/absolute/path/to/material.md"
 initial_goal_hint: ""

@@ -42,6 +42,26 @@
 
 如果用户直接提供聊天记录文本，Codex 应保存成材料文件，并把路径写入本地配置。
 
+## 2.5 项目模式
+
+AIOS 支持三种项目模式：
+
+```text
+greenfield：全新项目。
+brownfield：在现有项目上修改。
+rebuild：旧项目只读参考，新项目从零重构。
+```
+
+rebuild 模式必须区分：
+
+```text
+reference_source_dirs  旧项目源码，只读参考。
+target_source_dir      新项目源码，可写目标。
+source_material_file   聊天记录、需求说明或旧项目说明。
+```
+
+rebuild 模式下，第一轮必须生成旧项目分析和重构目标候选；不能直接修改旧项目，也不能直接开始写新项目代码。
+
 ## 3. 第一轮只初始化
 
 第一轮只能：

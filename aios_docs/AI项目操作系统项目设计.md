@@ -443,6 +443,41 @@ P2：可优化
 哪些情况直接失败
 ```
 
+## 七点五、重构项目模式：rebuild
+
+很多真实复杂项目不是在旧源码上继续修，而是需要参考旧项目，从新目录重新实现。AIOS 把这种场景定义为 rebuild 模式。
+
+配置角色：
+
+```text
+project_mode: rebuild
+target_source_dir: 新项目目录，可写
+source_code_dir: 兼容字段，通常等于 target_source_dir
+reference_source_dirs: 旧项目目录，只读参考
+source_material_file: 聊天记录 / 需求说明 / 原始材料
+```
+
+rebuild 模式第一轮产物建议包括：
+
+```text
+.aios/project/legacy_analysis.md       旧项目分析：保留什么、避免什么、可参考什么
+.aios/project/project_overview.md      新项目总体理解
+.aios/project/module_map.md            新项目候选模块边界
+.aios/project/initiative_index.md      I001/I002/I003 候选阶段
+.aios/evidence/evidence.draft.md       从旧项目和材料提取的证据
+.aios/context/candidate-goals.draft.md 重构目标候选
+```
+
+硬规则：
+
+```text
+旧项目只读，不允许修改、格式化、删除或生成文件。
+新项目目录是唯一可写目标。
+旧项目代码只能作为业务理解和参考，不应无脑复制旧设计。
+第一轮只理解和规划，不写业务代码。
+先确认 I001，再冻结 I001 的目标、需求、规格、检查、验收和任务图。
+```
+
 ## 八、复杂项目的多阶段结构：initiative
 
 真实复杂项目通常不是一次性完成，而是长期演进：一期、二期、三期，或者需求 1、需求 2、需求 3。

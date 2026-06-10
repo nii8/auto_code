@@ -1,9 +1,20 @@
 # AIOS 启动配置
 # 这是可提交的模板配置。真实项目路径写入 aios_config.local.yaml；该本地文件不提交。
 
-# 必填：真实源码项目目录。可以是绝对路径，也可以是相对路径。
-# 示例：/home/admin/claude/sp_v3/split_video/mini/sp_video
+# 项目模式：
+# - greenfield：全新项目
+# - brownfield：在现有项目上修改
+# - rebuild：旧项目只读参考，新项目从零重构
+project_mode: "greenfield"
+
+# 可写目标源码目录。复杂项目和 rebuild 模式优先填写这个字段。
+target_source_dir: ""
+
+# 兼容字段：等价于 target_source_dir。旧工具仍可读取该字段。
 source_code_dir: ""
+
+# 只读参考源码目录。rebuild 模式下填旧项目路径；AIOS / Worker 只能读取，不能修改。
+reference_source_dirs: []
 
 # 必填：原始项目材料文件。可以是聊天记录、会议纪要、录音转写、需求长文等纯文本 / Markdown 文件。
 # 示例：aios_docs/你的原始材料.md

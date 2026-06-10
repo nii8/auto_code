@@ -83,10 +83,17 @@ def print_run_summary(tasks: list[dict[str, Any]], total_seconds: float | int | 
 
 
 def source_dir(config: dict[str, Any]) -> Path:
-    raw = config.get("source_code_dir")
+    raw = config.get("target_source_dir") or config.get("source_code_dir")
     if not raw:
-        raise RuntimeError("source_code_dir is empty in aios_config.yaml")
-    return Path(raw).expanduser().resolve()
+        raise RuntimeError("target_source_dir/source_code_dir is empty in aios_config.yaml or aios_config.local.yaml")
+    return Path(str(raw)).expanduser().resolve()
+
+
+def reference_source_dirs(config: dict[str, Any]) -> list[Path]:
+    raw_dirs = config.get("reference_source_dirs") or []
+    if isinstance(raw_dirs, str):
+        raw_dirs = [raw_dirs]
+    return [Path(str(item)).expanduser().resolve() for item in raw_dirs if str(item).strip()]
 
 
 def aios_dir(config: dict[str, Any]) -> Path:
@@ -202,17 +209,28 @@ def read_if_exists(path: Path, max_chars: int = 12000) -> str:
 
 def build_prompt(config: dict[str, Any], task: dict[str, Any]) -> str:
     root = source_dir(config)
+    refs = reference_source_dirs(config)
+    project_mode = str(config.get("project_mode", "greenfield"))
     parts = [
         "你是 AIOS 的 Codex Worker。请只执行当前任务，不要改变项目方向。",
         "",
-        "# 工作目录",
+        "# 项目模式",
+        project_mode,
+        "",
+        "# 可写目标工作目录",
         str(root),
+        "",
+        "# 只读参考源码目录",
+        "\n".join(str(path) for path in refs) if refs else "无",
         "",
         "# 当前任务",
         json.dumps(task, ensure_ascii=False, indent=2),
         "",
         "# 硬性规则",
         "- 只修改 write_scope 中允许的文件或目录。",
+        "- 所有写入必须发生在可写目标工作目录内；不要写入只读参考源码目录。",
+        "- reference_source_dirs 只能读取和理解，不能修改、格式化、删除或生成文件。",
+        "- rebuild 模式下，旧项目只作为业务理解和参考，不允许把旧项目当作修补目标。",
         "- 不要修改 .aios/context、.aios/workflow、.aios/checks 中已冻结文档。",
         "- 不要实现任务明确排除的功能。",
         "- 如果任务不清楚或需要高风险操作，停止并说明 needs_human。",

@@ -250,6 +250,25 @@ AIOS 的完成判断遵守证据闸门：
 *.md
 ```
 
+## 三点四、rebuild 重构模式
+
+rebuild 模式用于“旧项目只读参考，新项目从零重构”。
+
+```text
+project_mode: rebuild
+target_source_dir: 新项目目录，可写
+reference_source_dirs: 旧项目目录，只读
+source_material_file: 聊天记录 / 需求说明
+```
+
+AIOS / Codex Worker 必须遵守：
+
+```text
+只能读取 reference_source_dirs。
+只能写入 target_source_dir。
+第一轮先生成 legacy_analysis、project_overview、initiative_index，不写代码。
+```
+
 ## 三点五、多阶段和串行执行
 
 复杂项目可以使用 initiative 管理多阶段、多需求：

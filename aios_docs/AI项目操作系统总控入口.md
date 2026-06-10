@@ -45,6 +45,26 @@ AIOS 工作目录固定创建在：
 只做项目初始化、证据草案、候选目标讨论
 ```
 
+## 1.5 项目模式和路径角色
+
+AIOS 启动时需要识别项目模式：
+
+```text
+greenfield：全新项目。
+brownfield：在现有项目上修改。
+rebuild：旧项目只读参考，新项目从零重构。
+```
+
+rebuild 模式下必须询问并写入本地配置：
+
+```text
+target_source_dir：新项目目录，可写。
+reference_source_dirs：旧项目目录，只读参考。
+source_material_file：聊天记录 / 需求说明 / 原始材料。
+```
+
+硬规则：旧项目只能读取、理解和参考，不能修改。所有代码写入只能发生在 target_source_dir。
+
 ## 2. 启动后的第一件事
 
 AI 启动后必须先做参数检查：
