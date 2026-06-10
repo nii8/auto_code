@@ -1,0 +1,16 @@
+# Python caches
+__pycache__/
+*.py[cod]
+
+# AIOS local runtime config
+aios_docs/aios_config.local.yaml
+
+# Local managed source project used during AIOS runs.
+# The AIOS framework is committed separately; project source/materials live locally
+# or in their own repository and should not be committed to this kernel repo.
+src/
+
+# Common editor / OS noise
+.DS_Store
+.idea/
+.vscode/

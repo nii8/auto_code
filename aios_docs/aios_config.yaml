@@ -1,5 +1,5 @@
 # AIOS 启动配置
-# 用户启动前优先修改这个文件。
+# 这是可提交的模板配置。真实项目路径写入 aios_config.local.yaml；该本地文件不提交。
 
 # 必填：真实源码项目目录。可以是绝对路径，也可以是相对路径。
 # 示例：/home/admin/claude/sp_v3/split_video/mini/sp_video
@@ -49,6 +49,3 @@ limits:
   max_repair_attempts: 3
   max_depth: 4
   max_runtime_minutes: 60
-  
-  
-  

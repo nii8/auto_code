@@ -2,6 +2,62 @@
 
 > 目的：把“AI 项目操作系统方法论”落地成一个可执行的 CLI / Python 自动化工具，通过文档、LLM、Codex、检查器、状态机共同推进复杂项目。
 
+## 零、运行时可信度原则
+
+AIOS 运行时的可信度来自证据链，而不是来自 AI 的完成感。
+
+执行链路必须分层：
+
+```text
+Codex Worker：负责实现、局部自检、普通代码错误修复。
+Runner：负责调度任务、保存日志、运行检查、判断是否允许进入下一任务。
+Checker：负责确定性验证、端到端验证、负向验证和报告扫描。
+Human Gate：负责目标冲突、高风险操作、连续失败和主观验收判断。
+```
+
+责任边界：
+
+```text
+Worker 可以说“我认为完成”。
+Checker 才能证明“检查通过”。
+Runner 才能把任务状态改为 done。
+用户只需要处理目标取舍、高风险授权和最终主观验收，不应该被迫调普通代码错误。
+```
+
+运行前必须做依赖预检。普通低风险依赖应尽量自动安装；系统级依赖、全局环境变更、密钥、账号、付费资源必须进入 Human Gate。
+
+运行后必须保存证据：
+
+```text
+.aios/runs/      每次任务运行、Codex 输出、检查结果、错误日志
+.aios/reports/   阶段报告、最终验证报告、未验证项说明
+可选截图/图片    浏览器截图、生成图片、视觉检查输入
+```
+
+## 零点五、当前执行策略：只串行，不并发
+
+AIOS 当前阶段明确不做并发执行。
+
+```text
+不启动多个 Codex Worker 同时写代码。
+不做文件锁并发。
+不做 git worktree 并发。
+不做自动合并并发分支。
+```
+
+原因：当前最重要的是目标冻结、任务拆解、证据闸门、自动修复和验收可信度。并发会引入锁、冲突检测、合并、回滚和集成复杂度，当前收益小于风险。
+
+当前 Runner 应保持：
+
+```text
+一个 active initiative
+一个 task_graph
+一个任务接一个任务串行执行
+失败先自动 repair，超过限制再 Human Gate
+```
+
+`dependencies` 和 `write_scope` 仍然保留，但用途是任务边界、写入限制、审查和未来扩展，不用于当前并发调度。
+
 ## 一、核心理解
 
 这个方向不是“越狱”或绕过安全限制，而是：**在安全边界内，把 Codex、LLM、Python、文档、检查器、状态机组织起来，让项目自动推进。**
@@ -538,24 +594,36 @@ aios run task.md
 
 ## 八、最小可实现版本
 
-可以先实现一个 `aios.py`：
+可以先实现一个用户友好的简化入口 `aios.py`，底层调用通用 Runner `aios_docs/tools/aios_runner.py`：
 
 ```text
-aios.py
 .aios/
   goal.md
   workflow.md
   acceptance.md
   examples.md
   state.json
+  tasks/task_graph.json
   runs/
 ```
 
 第一版只支持：
 
 ```bash
-python aios.py run "实现某个功能"
+python3 aios.py
 ```
+
+配套命令：
+
+```bash
+python3 aios.py          # 自动推进，直到完成 / 失败 / 需要确认
+python3 aios.py status   # 查看进度
+python3 aios.py preview  # 预览下一步
+python3 aios.py next     # 只执行一步
+python3 aios.py check    # 检查任务图
+```
+
+第一代半自动项目驾驶不是“每一步都让用户手动敲命令”。默认应自动连续推进低风险和中风险任务；只有失败、高风险、检查不通过、连续修复超过限制、任务依赖不清或需要用户验收取舍时，才触发 Human Gate。
 
 内部做：
 
@@ -567,6 +635,8 @@ python aios.py run "实现某个功能"
 5. 跑检查命令
 6. 生成报告
 ```
+
+Runner 应保持通用：项目差异只来自 `aios_config.yaml` 和项目自己的 `.aios/` 文件。换项目时不应重写 Runner，只需修改配置、重新初始化并生成新的任务图。
 
 不要一开始做复杂。
 

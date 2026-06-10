@@ -443,6 +443,166 @@ P2：可优化
 哪些情况直接失败
 ```
 
+## 八、复杂项目的多阶段结构：initiative
+
+真实复杂项目通常不是一次性完成，而是长期演进：一期、二期、三期，或者需求 1、需求 2、需求 3。
+
+AIOS 不应把多个阶段混在同一套 `goal.md` / `requirements.md` / `task_graph.json` 里。复杂项目应引入 initiative。
+
+### 1. initiative 定义
+
+一个 initiative 表示一个阶段、一个需求包、一次较完整变更或一个相对独立目标。
+
+示例：
+
+```text
+I001_mvp
+I002_user_login
+I003_admin_dashboard
+I004_performance_pass
+```
+
+### 2. 推荐目录结构
+
+```text
+.aios/
+  project/
+    project_overview.md
+    architecture.md
+    module_map.md
+    initiative_index.md
+
+  initiatives/
+    I001_mvp/
+      context/
+        goal.md
+        requirements.md
+        spec.md
+        examples.md
+        acceptance.md
+      workflow/
+        workflow.md
+      checks/
+        checks.md
+      tasks/
+        task_decomposition_request.md
+        codex_task_graph_draft.md
+        claude_task_graph_review.md
+        task_graph.md
+        task_graph.json
+      runs/
+      reports/
+      state.json
+
+  changes/
+    CR20260610_001_xxx/
+      request.md
+      impact_analysis.md
+      decision.md
+
+  shared/
+    constraints.md
+    coding_rules.md
+    dependency_policy.md
+    risk_policy.md
+    evidence_policy.md
+
+  global_state.json
+```
+
+### 3. MVP 兼容模式
+
+当前简单项目可以继续使用：
+
+```text
+.aios/context/
+.aios/workflow/
+.aios/checks/
+.aios/tasks/
+.aios/runs/
+.aios/reports/
+.aios/state.json
+```
+
+这叫单 initiative 兼容模式。
+
+复杂项目、新项目、多阶段项目，优先使用 `.aios/initiatives/<id>/`。
+
+### 4. 执行策略
+
+当前版本只支持串行执行：
+
+```text
+同一时间只执行一个 active initiative。
+同一时间只执行一个任务。
+Runner 按 dependencies 串行推进。
+不做多个 Codex Worker 并发写代码。
+不做文件锁并发。
+不做 git worktree 并发。
+```
+
+`write_scope` 和 `dependencies` 仍然必须保留，因为它们用于限制写入范围、审查任务边界、生成检查证据，并为未来可能扩展并发留下结构。
+
+## 八点二、变更请求流程：change request
+
+新需求或需求变更不应直接覆盖旧目标。应先形成 change request。
+
+流程：
+
+```text
+用户提出新需求 / 变更
+↓
+生成 changes/CR.../request.md
+↓
+分析影响 impact_analysis.md
+↓
+判断处理方式 decision.md
+↓
+进入现有 initiative / 新建 initiative / bugfix / 停止询问用户
+```
+
+处理方式：
+
+```text
+小修小补：进入当前 active initiative。
+新阶段 / 新需求包：创建新的 initiative。
+只修 bug：创建 bugfix change request，并绑定回归检查。
+目标冲突：停止，问用户。
+验收标准变化：回到验收层重新确认。
+```
+
+change request 至少包含：
+
+```text
+用户原始请求
+变更原因
+影响范围
+是否影响已冻结目标
+是否影响需求 / 规格 / 验收
+建议进入哪个 initiative
+需要用户确认的问题
+```
+
+## 八点五、任务拆解前的质量闸门
+
+在目标、需求、规格、样例、流程、检查、验收全部冻结后，不能立刻执行代码任务。必须先审查这些冻结文件是否足以支撑任务拆解。
+
+拆解前检查：
+
+```text
+目标是否一句话能说清楚。
+需求 / 非需求是否互相打架。
+规格是否能指导实现，而不是只有愿望。
+样例是否覆盖正向、边界和失败反例。
+流程是否从用户动作开始，到用户拿到结果结束。
+检查是否包含确定性检查、端到端检查和负向检查。
+验收是否能证明真实可用，而不是只证明文件存在。
+```
+
+如果以上任一项不清楚，任务拆解应标记 `needs_human`，回到对应层级补充，而不是硬拆任务。
+
+任务图质量决定自动化质量。任务拆得好，一气呵成是理想结果；任务拆得差，一气呵成反而危险，因为 AI 可能沿着错误轨道一路执行。
+
 ## 九、阶段 5：任务图和递归拆解
 
 子目标可能很难，需要递归拆解。
@@ -458,6 +618,23 @@ Task Graph / Work Breakdown Tree
 但这里建议增加一层：**外部工具任务拆解层**。
 
 因为不同模型擅长不同事情。如果 Claude 更擅长拆解复杂任务，就可以让 Claude 专门做任务拆解。
+
+### 0. 外部任务拆解协作原则
+
+复杂项目允许、也推荐把任务拆解独立出来，让更擅长规划的外部工具辅助审查，例如 Claude Code。
+
+推荐流程：
+
+```text
+1. AIOS 基于冻结文件生成 task_decomposition_request.md。
+2. Codex 先给出一版初始任务拆解草案。
+3. 用户可把该请求文件交给 Claude Code 或其他规划工具复审。
+4. 外部工具只做任务拆解建议，不直接执行代码。
+5. AIOS 合并/审查外部建议，生成 task_graph.md 和 task_graph.json。
+6. 任务图进入 Runner 前必须校验依赖、风险、写入范围、检查证据和人工闸门。
+```
+
+外部工具输出不是最终真理。最终任务图仍必须受 AIOS 的证据闸门、风险闸门和用户确认约束。
 
 ### 1. 先生成任务拆解请求文件
 

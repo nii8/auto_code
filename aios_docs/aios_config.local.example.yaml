@@ -1,0 +1,7 @@
+# AIOS 本地项目配置示例
+# 复制为 aios_config.local.yaml 后填写本机真实路径。
+# aios_config.local.yaml 已被 .gitignore 忽略，不提交 Git。
+
+source_code_dir: "/absolute/path/to/your/source"
+source_material_file: "/absolute/path/to/your/source/user_chat_log.md"
+initial_goal_hint: ""

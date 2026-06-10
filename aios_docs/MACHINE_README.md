@@ -1,14 +1,15 @@
-# AIOS 使用说明
+# AIOS 机器读内部说明
 
-> AIOS 是一套用于复杂项目的 AI 协作操作系统模板。它通过配置文件、方法论文档、Python 工具和 `.aios/` 工作目录，把“聊天驱动”升级为“流程驱动”。经验库是可选扩展，不是初始项目必需组件。
+> 本文件主要给 Codex / AIOS 内部流程读取，不是人类用户的主 README。人类用户请优先阅读仓库根目录 `README.md`。AIOS 通过配置文件、方法论文档、Python 工具和 `.aios/` 工作目录，把“聊天驱动”升级为“流程驱动”。经验库是可选扩展，不是初始项目必需组件。
 
 ## 一、目录结构
 
 ```text
 aios_docs/
-  README.md                         使用说明
-  aios_config.yaml                  每个项目启动前修改的配置文件
+  MACHINE_README.md                 给 AI / Codex 读取的内部说明
+  aios_config.yaml                  可提交模板配置，不写真实路径
   AI项目操作系统总控入口.md           Codex 启动入口
+  AIOS内核运行路线图.md              启动到执行的流程顺序索引
   AI项目操作系统方法论.md             通用方法论
   AI项目操作系统落地架构.md           Python / Codex / LLM 落地架构
   AI项目操作系统项目设计.md           项目初始化设计
@@ -25,14 +26,31 @@ aios_docs/
 它会告诉 Codex：
 
 ```text
-先读配置
-再读方法论
+先读 AIOS 内核运行路线图
+再读配置
+再读方法论 / 架构 / 项目设计
 如果经验库存在则按需读取
 再读原始材料
 再扫描源码
 先生成证据草案和候选目标
 不要第一轮直接改代码
 目标必须和用户确认后再冻结
+```
+
+### `AIOS内核运行路线图.md`
+
+新会话的流程顺序索引。
+
+它不会替代方法论和项目设计，只帮助 Codex 快速抓住主线：
+
+```text
+配置缺失时如何问用户
+第一轮只初始化
+逐层冻结顺序
+Codex + Claude Code 如何协作拆任务
+任务图如何融合确认
+Runner 如何执行
+证据闸门和人工闸门如何触发
 ```
 
 ### `aios_config.yaml`
@@ -65,6 +83,7 @@ llm_client.py      调用 OpenAI-compatible LLM，例如 qwen3.6-plus
 codex_runner.py    调用 codex exec
 check_runner.py    基础确定性检查
 state_manager.py   管理 .aios/state.json
+aios_runner.py     通用 AIOS 执行器：读取任务图并调用 Codex Worker
 ```
 
 ### `experience/`
@@ -88,8 +107,8 @@ aios_docs/aios_config.yaml
 填写：
 
 ```yaml
-source_code_dir: "/你的/源码/目录"
-source_material_file: "/你的/原始材料.md"
+source_code_dir: ""
+source_material_file: ""
 initial_goal_hint: "可选，一句话描述当前想做什么"
 ```
 
@@ -143,11 +162,81 @@ AIOS 的底层规则是：一次只确认一层，不能打包确认。
 检查
 验收
 任务拆解请求
+任务图
+AIOS Runner 执行
 ```
 
 例如：用户确认“目标正确”时，只表示目标层冻结；下一步只能生成并讨论“需求 / 非需求”草案，不能直接生成规格、样例、流程、检查、验收或任务拆解。
 
 任何阶段都必须先获得用户对当前层的明确确认，再进入下一层。
+
+任务拆解请求确认后，不应直接在当前聊天里裸写业务代码。正确做法是：
+
+```text
+1. 将任务拆解请求转换为 `.aios/tasks/task_graph.md` 和 `.aios/tasks/task_graph.json`。
+2. 使用通用 AIOS Runner 读取已冻结上下文、任务图和状态机。
+3. Runner 调用 Codex Worker 执行单个明确任务。
+4. Runner 保存运行日志、检查结果和状态更新。
+5. 低风险任务可继续执行；失败或高风险时停下让用户确认。
+```
+
+也就是说，聊天负责确认方向和规则；执行阶段以文件、任务图、Runner、Codex Worker 和检查器为准。
+
+普通用户不需要记住底层 Runner 命令，优先使用仓库根目录的交互式入口：
+
+```bash
+python3 aios.py
+```
+
+启动后会进入类似 Codex / OpenCode 的交互式驾驶舱：
+
+```text
+aios> run
+aios> status
+aios> preview
+aios> doctor
+aios> reset
+aios> 这一步为什么失败？
+aios> exit
+```
+
+直接回车或输入 `run`，AIOS 会先做依赖预检，再自动推进；遇到失败、高风险、阻塞或需要用户决策时，不会退出程序，而是停在 `aios>` 输入区，打印失败信息并等待用户自然语言输入。中文别名仍可用，例如“继续”“状态”“重置”。
+
+自动推进过程中，低风险和普通开发任务会连续执行；遇到以下情况会停下来：
+
+```text
+任务失败
+检查不通过
+任务被标记为高风险
+依赖缺失或任务阻塞
+超过最大步数 / 最大修复次数
+需要用户做产品取舍或验收判断
+```
+
+停下来之后，用户不需要理解底层 JSON，可以直接用自然语言继续：
+
+```text
+status    看卡在哪里
+run       修复后继续跑
+preview   看下一步准备做什么
+doctor    检查依赖和运行环境
+reset     清掉已生成业务代码和运行日志，从任务图重新演练
+```
+
+Runner 会保留 `.aios/context/`、`.aios/workflow/`、`.aios/checks/`、`.aios/tasks/` 等已确认资产；`reset` 只清理业务代码、任务产物和运行日志，用于重新演练执行流程。
+
+AIOS 的完成判断遵守证据闸门：
+
+```text
+没有证据，不允许宣布完成。
+检查器结论优先于 AI 自评。
+关键用户流程必须尽量被自动模拟。
+负向场景必须进入检查范围。
+缺依赖等普通环境问题应前置自动处理，不转嫁给用户手工排查。
+目标冲突、高风险操作、连续失败才进入人工闸门。
+```
+
+底层等价命令是 `python3 aios_docs/tools/aios_runner.py ...`，主要给调试和扩展时使用。
 
 确认前文件应是：
 
@@ -160,6 +249,26 @@ AIOS 的底层规则是：一次只确认一层，不能打包确认。
 ```text
 *.md
 ```
+
+## 三点五、多阶段和串行执行
+
+复杂项目可以使用 initiative 管理多阶段、多需求：
+
+```text
+.aios/initiatives/I001_xxx/
+.aios/initiatives/I002_xxx/
+.aios/changes/CR.../
+```
+
+当前执行策略固定为串行：
+
+```text
+同一时间只执行一个 active initiative。
+同一时间只执行一个任务。
+不做并发 Worker、文件锁并发或 git worktree 并发。
+```
+
+简单项目仍可使用 `.aios/context`、`.aios/tasks` 等单 initiative 兼容模式。
 
 ## 四、运行中产生的文件在哪里
 
@@ -340,14 +449,14 @@ python3 aios_docs/tools/state_manager.py --config aios_docs/aios_config.yaml sho
 
 ```text
 aios_docs/ 是固定模板和工具；经验库是可选扩展。
-aios_config.yaml 是每次项目启动前要改的配置。
+aios_config.yaml 是可提交模板配置；aios_config.local.yaml 是本地真实项目配置，不提交。
 <source_code_dir>/.aios/ 是某个具体项目的运行状态。
 ```
 
 换项目时：
 
 ```text
-改 aios_config.yaml
+写入或更新 aios_config.local.yaml
 不要删 aios_docs
 如果 experience 存在且有用户确认保留的经验，不要误删
 必要时删除或归档旧项目的 .aios
