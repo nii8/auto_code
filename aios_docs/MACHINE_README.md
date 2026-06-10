@@ -66,6 +66,9 @@ source_code_dir: ""       # 兼容字段，通常等于 target_source_dir
 reference_source_dirs: []  # rebuild 时填写旧项目只读参考目录
 source_material_file: ""  # 原始材料 / 聊天记录 / 需求说明
 initial_goal_hint: ""     # 可选，当前阶段目标提示
+active_initiative: ""     # 可选，当前执行的 initiative；为空时使用顶层兼容模式
+runtime.python_packages: [] # 可选，项目声明的低风险 Python 依赖
+reset.generated_paths: []  # 可选，reset 时允许清理的可重建路径
 ```
 
 AIOS 工作目录固定为：
@@ -85,7 +88,7 @@ config_loader.py   读取 aios_config.yaml
 llm_client.py      调用 OpenAI-compatible LLM，例如 qwen3.6-plus
 codex_runner.py    调用 codex exec
 check_runner.py    基础确定性检查
-state_manager.py   管理 .aios/state.json
+state_manager.py   管理当前 workspace 的 state.json
 aios_runner.py     通用 AIOS 执行器：读取任务图并调用 Codex Worker
 ```
 
@@ -175,7 +178,7 @@ AIOS Runner 执行
 任务拆解请求确认后，不应直接在当前聊天里裸写业务代码。正确做法是：
 
 ```text
-1. 将任务拆解请求转换为 `.aios/tasks/task_graph.md` 和 `.aios/tasks/task_graph.json`。
+1. 将任务拆解请求转换为当前 workspace 的 `tasks/task_graph.md` 和 `tasks/task_graph.json`。
 2. 使用通用 AIOS Runner 读取已冻结上下文、任务图和状态机。
 3. Runner 调用 Codex Worker 执行单个明确任务。
 4. Runner 保存运行日志、检查结果和状态更新。
@@ -222,10 +225,10 @@ status    看卡在哪里
 run       修复后继续跑
 preview   看下一步准备做什么
 doctor    检查依赖和运行环境
-reset     清掉已生成业务代码和运行日志，从任务图重新演练
+reset     清掉运行日志和任务状态，从任务图重新演练
 ```
 
-Runner 会保留 `.aios/context/`、`.aios/workflow/`、`.aios/checks/`、`.aios/tasks/` 等已确认资产；`reset` 只清理业务代码、任务产物和运行日志，用于重新演练执行流程。
+Runner 会保留 `.aios/project/`、`.aios/shared/`、当前 initiative 的 `context/`、`workflow/`、`checks/`、`tasks/` 等已确认资产；`reset` 默认只清理运行日志和任务状态。只有项目配置显式声明 `reset.generated_paths` 时，才清理这些可重建路径。
 
 AIOS 的完成判断遵守证据闸门：
 
@@ -268,7 +271,7 @@ AIOS / Codex Worker 必须遵守：
 ```text
 只能读取 reference_source_dirs。
 只能写入 target_source_dir。
-第一轮先生成 legacy_analysis、project_overview、initiative_index，不写代码。
+第一轮先生成 legacy_analysis、project_overview、module_map、pipeline_map、initiative_index，不写代码。
 ```
 
 ## 三点五、多阶段和串行执行
@@ -374,7 +377,8 @@ mv <source_code_dir>/.aios <source_code_dir>/.aios_archive_YYYYMMDD
 直接重新启动 Codex，让它读取：
 
 ```text
-<source_code_dir>/.aios/state.json
+<source_code_dir>/.aios/initiatives/<id>/state.json
+# 或兼容模式：<source_code_dir>/.aios/state.json
 ```
 
 继续上次状态。

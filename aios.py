@@ -20,7 +20,18 @@ from config_loader import load_config
 TERMINAL_DONE = {"done"}
 WAITING = {"pending"}
 BLOCKING = {"failed", "blocked", "needs_human"}
-RESETTABLE_PATHS = ["app.py", "templates", "static", "jobs", ".codex", "__pycache__"]
+PROTECTED_RESET_PREFIXES = {
+    ".aios/source",
+    ".aios/evidence",
+    ".aios/context",
+    ".aios/workflow",
+    ".aios/checks",
+    ".aios/tasks",
+    ".aios/project",
+    ".aios/initiatives",
+    ".aios/changes",
+    ".aios/shared",
+}
 
 
 class AiosExit(Exception):
@@ -137,25 +148,76 @@ def resolve_command(raw: str | None) -> str:
 
 def source_root_from_config() -> Path:
     config = load_aios_config()
-    value = str(config.get("source_code_dir", "")).strip()
+    value = str(config.get("target_source_dir") or config.get("source_code_dir") or "").strip()
     if value:
         return Path(value).expanduser().resolve()
-    raise RuntimeError("aios_config.yaml / aios_config.local.yaml 里没有 source_code_dir")
+    raise RuntimeError("aios_config.yaml / aios_config.local.yaml 里没有 target_source_dir/source_code_dir")
+
+
+def aios_root_from_config() -> Path:
+    return source_root_from_config() / ".aios"
+
+
+def active_initiative_id() -> str:
+    config = load_aios_config()
+    configured = str(config.get("active_initiative") or "").strip()
+    if configured:
+        return validate_initiative_id(configured)
+    global_state_path = aios_root_from_config() / "global_state.json"
+    if not global_state_path.exists():
+        return ""
+    try:
+        state = json.loads(global_state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return validate_initiative_id(str(state.get("active_initiative") or "").strip())
+
+
+def validate_initiative_id(value: str) -> str:
+    if not value:
+        return ""
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts or "/" in value or "\\" in value:
+        raise RuntimeError("active_initiative 只能是 initiative 目录名，不能包含路径或 ..")
+    return value
+
+
+def active_aios_workspace() -> Path:
+    initiative_id = active_initiative_id()
+    if initiative_id:
+        return aios_root_from_config() / "initiatives" / initiative_id
+    return aios_root_from_config()
 
 
 def append_user_note(text: str) -> Path:
-    source_root = source_root_from_config()
-    notes_path = source_root / ".aios" / "runs" / "user_notes.md"
+    notes_path = active_aios_workspace() / "runs" / "user_notes.md"
     notes_path.parent.mkdir(parents=True, exist_ok=True)
     with notes_path.open("a", encoding="utf-8") as file:
         file.write(f"\n## 用户输入\n\n{text.strip()}\n")
     return notes_path
 
 
+def runtime_python_packages() -> list[tuple[str, str]]:
+    config = load_aios_config()
+    raw = config.get("runtime", {}).get("python_packages", [])
+    if isinstance(raw, str):
+        raw = [] if raw.strip() in {"", "[]"} else [raw]
+    packages = []
+    for item in raw or []:
+        if isinstance(item, dict):
+            package_name = str(item.get("package") or item.get("name") or "").strip()
+            module_name = str(item.get("module") or package_name).strip()
+        else:
+            package_name = str(item).strip()
+            module_name = package_name
+        if package_name and module_name:
+            packages.append((package_name, module_name))
+    return packages
+
+
 def missing_runtime_modules() -> list[str]:
-    required = {"flask": "flask", "Pillow": "PIL"}
     missing = []
-    for package_name, module_name in required.items():
+    for package_name, module_name in runtime_python_packages():
         if importlib.util.find_spec(module_name) is None:
             missing.append(package_name)
     return missing
@@ -167,7 +229,7 @@ def print_environment_hint() -> None:
         return
     print("\n🔧 当前运行环境可能还没准备好：")
     print(f"- 缺少 Python 包：{', '.join(missing)}")
-    print("- 可在项目环境里安装后再继续，例如：`python3 -m pip install flask Pillow`")
+    print(f"- 可在项目环境里安装后再继续，例如：`python3 -m pip install {' '.join(missing)}`")
 
 
 def ensure_runtime_dependencies(auto_install: bool = True) -> bool:
@@ -175,7 +237,7 @@ def ensure_runtime_dependencies(auto_install: bool = True) -> bool:
     if not missing:
         return True
     print("\n🔧 AIOS 运行前依赖预检")
-    print(f"- 缺少低风险 Python 包：{', '.join(missing)}")
+    print(f"- 缺少项目配置声明的低风险 Python 包：{', '.join(missing)}")
     if not auto_install:
         print("- 当前命令只诊断，不自动安装。")
         return False
@@ -201,7 +263,7 @@ def print_help() -> None:
     print("  next                  只执行一个任务")
     print("  check                 检查任务图")
     print("  doctor                检查本地运行环境")
-    print("  reset                 清掉业务代码和运行日志，从任务图重跑")
+    print("  reset                 清掉运行日志和任务状态，从任务图重跑")
     print("  exit                  离开 AIOS")
     print("  其他自然语言           记录为用户备注，然后你可以输入 run")
     print("\n中文别名仍可用：继续、状态、预览、单步、检查、诊断、重置、退出。")
@@ -215,11 +277,36 @@ def cmd_doctor() -> int:
     missing = missing_runtime_modules()
     if missing:
         print(f"- 缺少依赖：{', '.join(missing)}")
-        print("- 建议先运行：`python3 -m pip install flask Pillow`")
+        print(f"- 建议先运行：`python3 -m pip install {' '.join(missing)}`")
         return 1
-    print("- Flask / Pillow：已可导入")
-    print("- 环境看起来可以运行当前奖状 MVP。")
+    configured_packages = runtime_python_packages()
+    if configured_packages:
+        print("- 项目配置声明的 Python 包：已可导入")
+    else:
+        print("- 项目配置未声明需要预检的 Python 包")
+    print("- AIOS 内核环境看起来可用。")
     return 0
+
+
+def resettable_paths_from_config() -> list[Path]:
+    config = load_aios_config()
+    raw = config.get("reset", {}).get("generated_paths", [])
+    if isinstance(raw, str):
+        raw = [] if raw.strip() in {"", "[]"} else [raw]
+    source_root = source_root_from_config()
+    paths: list[Path] = []
+    for item in raw or []:
+        rel_text = str(item).strip().strip("/")
+        if not rel_text or rel_text in {".", ".."}:
+            continue
+        rel_path = Path(rel_text)
+        if rel_path.is_absolute() or ".." in rel_path.parts:
+            continue
+        normalized = rel_path.as_posix()
+        if any(normalized == prefix or normalized.startswith(prefix + "/") for prefix in PROTECTED_RESET_PREFIXES):
+            continue
+        paths.append(source_root / rel_path)
+    return paths
 
 
 def cmd_check() -> int:
@@ -358,10 +445,19 @@ def cmd_run() -> int:
 def cmd_reset() -> int:
     if not ensure_project_configured():
         return 1
-    source_root = source_root_from_config()
-    print("🧹 重置执行现场，只保留已确认的 AIOS 文档和原始材料。")
-    for rel in RESETTABLE_PATHS:
-        path = source_root / rel
+    workspace = active_aios_workspace()
+    initiative_id = active_initiative_id()
+    print("🧹 重置执行现场，保留源码、原始材料和已确认的 AIOS 文档。")
+    if initiative_id:
+        print(f"- 当前 initiative：{initiative_id}")
+    else:
+        print("- 当前模式：顶层 .aios 兼容模式")
+    generated_paths = resettable_paths_from_config()
+    if generated_paths:
+        print("- 将按配置清理 reset.generated_paths 中声明的生成路径。")
+    else:
+        print("- 未配置 reset.generated_paths，不删除业务源码或生成产物。")
+    for path in generated_paths:
         if not path.exists():
             continue
         if path.is_dir():
@@ -370,13 +466,13 @@ def cmd_reset() -> int:
             path.unlink()
         print(f"- 已删除：{path}")
 
-    for folder in [source_root / ".aios" / "runs", source_root / ".aios" / "reports"]:
+    for folder in [workspace / "runs", workspace / "reports"]:
         if folder.exists():
             for child in folder.iterdir():
                 shutil.rmtree(child) if child.is_dir() else child.unlink()
         folder.mkdir(parents=True, exist_ok=True)
 
-    graph_path = source_root / ".aios" / "tasks" / "task_graph.json"
+    graph_path = workspace / "tasks" / "task_graph.json"
     graph = json.loads(graph_path.read_text(encoding="utf-8"))
     for task in graph.get("tasks", []):
         task["status"] = "pending"
@@ -385,12 +481,12 @@ def cmd_reset() -> int:
     graph.get("root_task", {})["status"] = "pending"
     graph_path.write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    state_path = source_root / ".aios" / "state.json"
+    state_path = workspace / "state.json"
     state = {
         "phase": "READY_TO_EXECUTE",
         "status": "reset_done",
         "iteration": 0,
-        "history": [{"phase": "READY_TO_EXECUTE", "status": "reset_done", "note": "business files and run logs cleared; frozen AIOS docs kept"}],
+        "history": [{"phase": "READY_TO_EXECUTE", "status": "reset_done", "note": "run logs and task status cleared; source and frozen AIOS docs kept"}],
     }
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     print("✅ 已 reset。输入 `run` 或直接回车即可从 T1 重新开始。")

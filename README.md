@@ -122,37 +122,45 @@ python3 aios.py check     # 检查任务图
 python3 aios.py preview   # 预览下一步，不改代码
 python3 aios.py next      # 只执行一个任务
 python3 aios.py run       # 自动推进
-python3 aios.py reset     # 清掉执行产物，从任务图重跑
+python3 aios.py reset     # 清掉运行日志和任务状态，从任务图重跑
 ```
 
-`run` / `next` 会先做依赖预检。低风险 Python 包依赖会尽量自动安装，不应该让普通用户手动当环境消防员。
+`run` / `next` 会先做依赖预检。项目配置中明确声明的低风险 Python 包依赖会尽量自动安装，不应该让普通用户手动当环境消防员。
 
 ## 标准项目流程
 
-AIOS 不应该一开始就写代码。标准流程是逐层确认、逐层冻结。
+AIOS 不应该一开始就写代码。真实复杂项目通常先有整体业务、pipeline、模块边界和阶段规划，然后才进入某个阶段或模块的具体实现。标准流程是先做项目级规划，再对当前 initiative 逐层确认、逐层冻结。
 
 ```text
+原始材料 / 旧项目 / 现有源码
+↓
 证据草案
 ↓
-候选目标
+项目总览 project_overview.md
 ↓
-goal.md
+模块 / pipeline 关系 module_map.md / pipeline_map.md
 ↓
-requirements.md
+阶段规划 initiative_index.md
 ↓
-spec.md
+选择并确认 active initiative
 ↓
-examples.md
+当前 initiative 的 goal.md
 ↓
-workflow.md
+当前 initiative 的 requirements.md
 ↓
-checks.md
+当前 initiative 的 spec.md
 ↓
-acceptance.md
+当前 initiative 的 examples.md
 ↓
-task_decomposition_request.md
+当前 initiative 的 workflow.md
 ↓
-task_graph.md / task_graph.json
+当前 initiative 的 checks.md
+↓
+当前 initiative 的 acceptance.md
+↓
+当前 initiative 的 task_decomposition_request.md
+↓
+当前 initiative 的 task_graph.md / task_graph.json
 ↓
 AIOS Runner 执行
 ```
@@ -204,17 +212,21 @@ source_material_file: 聊天记录 / 需求说明 / 旧项目说明
 请先理解旧项目和材料，生成项目理解、旧项目分析、重构目标候选，不要写代码。
 ```
 
-## 多阶段项目：initiative
+## 多阶段 / 多模块项目：initiative
 
-真实项目通常不是一次性完成，而是长期演进：一期、二期、三期，或者需求 1、需求 2、需求 3。
-
-AIOS 不建议把多个阶段混在同一套目标文件里。复杂项目应使用 initiative：
+真实项目通常不是一次性完成，而是长期演进：一期、二期、三期，或者多个业务模块沿 pipeline 流动。AIOS 不建议把大项目、阶段目标、模块目标混在同一套目标文件里。复杂项目应使用项目级文件 + initiative：
 
 ```text
-.aios/initiatives/I001_mvp/
-.aios/initiatives/I002_user_login/
-.aios/initiatives/I003_admin_dashboard/
+.aios/project/project_overview.md
+.aios/project/module_map.md
+.aios/project/pipeline_map.md
+.aios/project/initiative_index.md
+.aios/initiatives/I001_foundation/
+.aios/initiatives/I002_pipeline_ingest/
+.aios/initiatives/I003_pipeline_export/
 ```
+
+项目级文件回答：整体业务是什么、有哪些模块、模块之间如何流动、一期二期三期怎么排。每个 initiative 回答：当前阶段或当前模块到底要做到什么。
 
 每个 initiative 都可以有自己的：
 
@@ -412,17 +424,17 @@ AIOS 必须停下来问用户：
 
 ## reset 会做什么
 
-`python3 aios.py reset` 用于重新演练执行流程。
+`python3 aios.py reset` 用于重新演练当前 active initiative 的执行流程。
 
 它会清理：
 
 ```text
-业务代码
-生成产物
 运行日志
 报告
 任务执行状态
 ```
+
+默认不删除业务源码，也不删除生成产物。只有当项目配置显式声明 `reset.generated_paths` 时，AIOS 才会清理这些可重建路径。
 
 它会保留：
 
@@ -443,16 +455,14 @@ AIOS 内核文档
 
 ## 当前项目状态
 
-这个仓库曾用一个本地 Flask 中文奖状生成器 MVP 跑通过流程验证。该测试项目属于本机 `source_code_dir`，不作为 AIOS 内核提交。
+这个仓库是 AIOS 内核仓库，不绑定任何特定业务应用。真实业务项目通过 `aios_config.local.yaml` 指向本机可写项目目录，业务源码、原始材料和 `.aios/` 工作目录通常属于被管理项目，而不是这个内核仓库。
 
-这个测试项目不是 AIOS 的最终目标，它只是用来验证：
+当前内核重点验证：
 
 ```text
 AIOS 能否读取冻结文件
 AIOS 能否按任务图调用 Codex Worker
-AIOS 能否自动执行 T1 到 T7
+AIOS 能否按 active initiative 自动推进任务
 AIOS 能否做依赖预检、检查、报告、耗时汇总
 AIOS 能否用证据约束“完成”
 ```
-
-真正重要的是 AIOS 流程本身，而不是这个奖状应用本身。

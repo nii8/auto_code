@@ -20,3 +20,14 @@ reference_source_dirs:
 # 聊天记录 / 需求说明 / 原始材料。
 source_material_file: "/absolute/path/to/material.md"
 initial_goal_hint: ""
+
+# 可选：当前要执行的 initiative。也可以写在 <target_source_dir>/.aios/global_state.json。
+active_initiative: "I001_foundation"
+
+# 可选：项目声明的低风险 Python 包依赖。module 用于 import 检查，package 用于 pip 安装。
+runtime:
+  python_packages: []
+
+# 可选：reset 时允许删除的可重建路径。默认不删除业务源码或生成产物。
+reset:
+  generated_paths: []

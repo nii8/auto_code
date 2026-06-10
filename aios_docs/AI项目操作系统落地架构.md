@@ -29,10 +29,12 @@ Runner 才能把任务状态改为 done。
 运行后必须保存证据：
 
 ```text
-.aios/runs/      每次任务运行、Codex 输出、检查结果、错误日志
-.aios/reports/   阶段报告、最终验证报告、未验证项说明
+<workspace>/runs/      每次任务运行、Codex 输出、检查结果、错误日志
+<workspace>/reports/   阶段报告、最终验证报告、未验证项说明
 可选截图/图片    浏览器截图、生成图片、视觉检查输入
 ```
+
+复杂项目的 `<workspace>` 通常是 `.aios/initiatives/<id>/`；单 initiative 兼容模式下是顶层 `.aios/`。
 
 ## 零点五、当前执行策略：只串行，不并发
 
@@ -249,7 +251,7 @@ def run_codex(prompt, cwd):
 也可以把最后回复写入文件：
 
 ```bash
-codex exec -o .aios/runs/001_last_message.md "执行任务..."
+codex exec -o <workspace>/runs/001_last_message.md "执行任务..."
 ```
 
 如果要多轮，可以用：
@@ -376,7 +378,7 @@ Python 实现“多轮对话”有三种方式。
 
 最推荐。
 
-Python 把历史状态写入 `.aios/state.json` 和 `.aios/run_log.md`，每次调用 LLM / Codex 时，把必要上下文重新拼进去。
+Python 把历史状态写入当前 workspace 的 `state.json` 和 `runs/`，每次调用 LLM / Codex 时，把必要上下文重新拼进去。
 
 优点：
 

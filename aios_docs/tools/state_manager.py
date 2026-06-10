@@ -26,8 +26,38 @@ def aios_dir(config: dict) -> Path:
     return Path(source_code_dir).expanduser().resolve() / ".aios"
 
 
+def active_initiative_id(config: dict) -> str:
+    configured = str(config.get("active_initiative") or "").strip()
+    if configured:
+        return validate_initiative_id(configured)
+    global_state_path = aios_dir(config) / "global_state.json"
+    if not global_state_path.exists():
+        return ""
+    try:
+        state = json.loads(global_state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return validate_initiative_id(str(state.get("active_initiative") or "").strip())
+
+
+def validate_initiative_id(value: str) -> str:
+    if not value:
+        return ""
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts or "/" in value or "\\" in value:
+        raise RuntimeError("active_initiative must be a directory name, not a path")
+    return value
+
+
+def active_workspace_dir(config: dict) -> Path:
+    initiative_id = active_initiative_id(config)
+    if initiative_id:
+        return aios_dir(config) / "initiatives" / initiative_id
+    return aios_dir(config)
+
+
 def state_path(config: dict) -> Path:
-    return aios_dir(config) / "state.json"
+    return active_workspace_dir(config) / "state.json"
 
 
 def load_state(config: dict) -> dict:

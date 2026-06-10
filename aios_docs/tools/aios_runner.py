@@ -24,7 +24,19 @@ from config_loader import load_config
 
 TERMINAL_STATUSES = {"done", "failed", "blocked", "skipped_with_reason", "needs_human"}
 READY_STATUSES = {"pending", "failed"}
-CONTEXT_FILES = [
+PROJECT_CONTEXT_FILES = [
+    ".aios/project/project_overview.md",
+    ".aios/project/architecture.md",
+    ".aios/project/module_map.md",
+    ".aios/project/pipeline_map.md",
+    ".aios/project/initiative_index.md",
+    ".aios/shared/constraints.md",
+    ".aios/shared/coding_rules.md",
+    ".aios/shared/dependency_policy.md",
+    ".aios/shared/risk_policy.md",
+    ".aios/shared/evidence_policy.md",
+]
+COMPAT_CONTEXT_FILES = [
     ".aios/context/goal.md",
     ".aios/context/requirements.md",
     ".aios/context/spec.md",
@@ -32,6 +44,15 @@ CONTEXT_FILES = [
     ".aios/workflow/workflow.md",
     ".aios/checks/checks.md",
     ".aios/context/acceptance.md",
+]
+INITIATIVE_CONTEXT_FILES = [
+    "context/goal.md",
+    "context/requirements.md",
+    "context/spec.md",
+    "context/examples.md",
+    "workflow/workflow.md",
+    "checks/checks.md",
+    "context/acceptance.md",
 ]
 
 
@@ -100,22 +121,52 @@ def aios_dir(config: dict[str, Any]) -> Path:
     return source_dir(config) / ".aios"
 
 
+def active_initiative_id(config: dict[str, Any]) -> str:
+    configured = str(config.get("active_initiative") or "").strip()
+    if configured:
+        return validate_initiative_id(configured)
+    global_state_path = aios_dir(config) / "global_state.json"
+    if global_state_path.exists():
+        try:
+            state = load_json(global_state_path)
+        except Exception:
+            return ""
+        return validate_initiative_id(str(state.get("active_initiative") or "").strip())
+    return ""
+
+
+def validate_initiative_id(value: str) -> str:
+    if not value:
+        return ""
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts or "/" in value or "\\" in value:
+        raise RuntimeError("active_initiative must be a directory name, not a path")
+    return value
+
+
+def active_workspace_dir(config: dict[str, Any]) -> Path:
+    initiative_id = active_initiative_id(config)
+    if initiative_id:
+        return aios_dir(config) / "initiatives" / initiative_id
+    return aios_dir(config)
+
+
 def state_path(config: dict[str, Any]) -> Path:
-    return aios_dir(config) / "state.json"
+    return active_workspace_dir(config) / "state.json"
 
 
 def task_graph_path(config: dict[str, Any]) -> Path:
-    return aios_dir(config) / "tasks" / "task_graph.json"
+    return active_workspace_dir(config) / "tasks" / "task_graph.json"
 
 
 def runs_dir(config: dict[str, Any]) -> Path:
-    path = aios_dir(config) / "runs"
+    path = active_workspace_dir(config) / "runs"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def reports_dir(config: dict[str, Any]) -> Path:
-    path = aios_dir(config) / "reports"
+    path = active_workspace_dir(config) / "reports"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -211,11 +262,17 @@ def build_prompt(config: dict[str, Any], task: dict[str, Any]) -> str:
     root = source_dir(config)
     refs = reference_source_dirs(config)
     project_mode = str(config.get("project_mode") or "未配置")
+    initiative_id = active_initiative_id(config)
+    workspace = active_workspace_dir(config)
     parts = [
         "你是 AIOS 的 Codex Worker。请只执行当前任务，不要改变项目方向。",
         "",
         "# 项目模式",
         project_mode,
+        "",
+        "# 当前执行范围",
+        f"active_initiative: {initiative_id or '兼容模式：顶层 .aios'}",
+        f"aios_workspace: {workspace}",
         "",
         "# 可写目标工作目录",
         str(root),
@@ -231,7 +288,9 @@ def build_prompt(config: dict[str, Any], task: dict[str, Any]) -> str:
         "- 所有写入必须发生在可写目标工作目录内；不要写入只读参考源码目录。",
         "- reference_source_dirs 只能读取和理解，不能修改、格式化、删除或生成文件。",
         "- rebuild 模式下，旧项目只作为业务理解和参考，不允许把旧项目当作修补目标。",
-        "- 不要修改 .aios/context、.aios/workflow、.aios/checks 中已冻结文档。",
+        "- 不要修改 .aios/project、.aios/shared、当前 initiative 的 context/workflow/checks 等已冻结文档。",
+        "- 如果任务属于复杂 pipeline，必须尊重 module_map/pipeline_map 中的上下游关系和阶段边界。",
+        "- 如果发现当前任务会破坏其他模块、其他 initiative 或项目级约束，停止并说明 needs_human。",
         "- 不要实现任务明确排除的功能。",
         "- 如果任务不清楚或需要高风险操作，停止并说明 needs_human。",
         "- 没有证据不允许宣布完成；不能只凭自评说任务完成。",
@@ -240,12 +299,23 @@ def build_prompt(config: dict[str, Any], task: dict[str, Any]) -> str:
         "- 如果因为环境、权限或外部依赖无法验证，必须明确写出未验证项和阻塞原因，不要包装成完成。",
         "- 完成报告必须包含：改动文件、运行命令、检查结果、证据路径、未验证项。",
         "",
-        "# 已冻结上下文",
+        "# 项目级冻结上下文",
     ]
-    for rel in CONTEXT_FILES:
+    for rel in PROJECT_CONTEXT_FILES:
         text = read_if_exists(root / rel)
         if text:
             parts.extend([f"\n## {rel}", text])
+    parts.append("\n# 当前目标冻结上下文")
+    if initiative_id:
+        for rel in INITIATIVE_CONTEXT_FILES:
+            text = read_if_exists(workspace / rel)
+            if text:
+                parts.extend([f"\n## .aios/initiatives/{initiative_id}/{rel}", text])
+    else:
+        for rel in COMPAT_CONTEXT_FILES:
+            text = read_if_exists(root / rel)
+            if text:
+                parts.extend([f"\n## {rel}", text])
     return "\n".join(parts)
 
 

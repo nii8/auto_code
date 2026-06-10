@@ -480,21 +480,21 @@ rebuild 模式第一轮产物建议包括：
 
 ## 八、复杂项目的多阶段结构：initiative
 
-真实复杂项目通常不是一次性完成，而是长期演进：一期、二期、三期，或者需求 1、需求 2、需求 3。
+真实复杂项目通常不是一次性完成，而是长期演进：一期、二期、三期，或者多个业务模块沿 pipeline 流动。AIOS 必须先理解整体项目，再进入某个阶段或模块目标。
 
 AIOS 不应把多个阶段混在同一套 `goal.md` / `requirements.md` / `task_graph.json` 里。复杂项目应引入 initiative。
 
 ### 1. initiative 定义
 
-一个 initiative 表示一个阶段、一个需求包、一次较完整变更或一个相对独立目标。
+一个 initiative 表示一个阶段、一个需求包、一个 pipeline 模块、一次较完整变更或一个相对独立目标。项目级文件描述整体业务和模块关系；initiative 文件描述当前要落地的局部目标。
 
 示例：
 
 ```text
-I001_mvp
-I002_user_login
-I003_admin_dashboard
-I004_performance_pass
+I001_foundation
+I002_pipeline_ingest
+I003_pipeline_transform
+I004_pipeline_export
 ```
 
 ### 2. 推荐目录结构
@@ -505,10 +505,11 @@ I004_performance_pass
     project_overview.md
     architecture.md
     module_map.md
+    pipeline_map.md
     initiative_index.md
 
   initiatives/
-    I001_mvp/
+    I001_foundation/
       context/
         goal.md
         requirements.md
@@ -545,7 +546,7 @@ I004_performance_pass
   global_state.json
 ```
 
-### 3. MVP 兼容模式
+### 3. 单 initiative 兼容模式
 
 当前简单项目可以继续使用：
 
@@ -673,10 +674,11 @@ Task Graph / Work Breakdown Tree
 
 ### 1. 先生成任务拆解请求文件
 
-AIOS 先写一个文件：
+AIOS 先在当前 workspace 写一个文件。复杂项目是当前 active initiative 目录，单 initiative 兼容模式是顶层 `.aios`：
 
 ```text
-.aios/tasks/task_decomposition_request.md
+.aios/initiatives/<id>/tasks/task_decomposition_request.md
+# 或兼容模式：.aios/tasks/task_decomposition_request.md
 ```
 
 这个文件不是最终任务图，而是给外部工具阅读的任务拆解说明。
@@ -712,7 +714,7 @@ AIOS 先写一个文件：
 5. 如果任务可以并行，请标记 parallel_group。
 6. 如果任务必须串行，请写明依赖。
 7. 不要执行任务，只做任务拆解。
-8. 输出写入 .aios/tasks/task_graph.md 和 .aios/tasks/task_graph.json。
+8. 输出写入当前 workspace 的 tasks/task_graph.md 和 tasks/task_graph.json。
 ```
 
 ### 3. 用户调用 Claude 拆解
@@ -720,14 +722,15 @@ AIOS 先写一个文件：
 用户可以把这个文件交给 Claude：
 
 ```text
-请阅读 .aios/tasks/task_decomposition_request.md，按里面的提示词拆解任务，并把结果写入指定文件。
+请阅读当前 active initiative 的 tasks/task_decomposition_request.md，按里面的提示词拆解任务，并把结果写入同一 tasks/ 目录。
 ```
 
 Claude 输出：
 
 ```text
-.aios/tasks/task_graph.md
-.aios/tasks/task_graph.json
+.aios/initiatives/<id>/tasks/task_graph.md
+.aios/initiatives/<id>/tasks/task_graph.json
+# 或兼容模式：.aios/tasks/task_graph.md / .aios/tasks/task_graph.json
 ```
 
 ### 4. AIOS 再回来读取任务图
@@ -735,8 +738,9 @@ Claude 输出：
 Python / Codex / LLM 再读取：
 
 ```text
-.aios/tasks/task_graph.md
-.aios/tasks/task_graph.json
+.aios/initiatives/<id>/tasks/task_graph.md
+.aios/initiatives/<id>/tasks/task_graph.json
+# 或兼容模式：.aios/tasks/task_graph.md / .aios/tasks/task_graph.json
 ```
 
 然后进入执行阶段。
@@ -1010,7 +1014,7 @@ AIOS 必须进入 LOAD_TASK_GRAPH 状态
 校验每个任务都有输入、输出、验收标准、风险等级
 ```
 
-## 十三、建议 MVP
+## 十三、建议第一版
 
 不要一开始做全功能。
 
@@ -1032,17 +1036,20 @@ AIOS 必须进入 LOAD_TASK_GRAPH 状态
 .aios/evidence/failure_examples.md
 .aios/evidence/open_questions.md
 
-.aios/context/00_project_goal.md
-.aios/context/01_requirements.md
-.aios/context/02_specifications.md
-.aios/context/03_examples.md
-.aios/context/04_acceptance.md
+.aios/project/project_overview.md
+.aios/project/module_map.md
+.aios/project/pipeline_map.md
+.aios/project/initiative_index.md
 
-.aios/workflow/00_overall_workflow.md
-.aios/checks/deterministic_checks.md
-.aios/checks/llm_judgment_checks.md
-.aios/tasks/task_decomposition_request.md
-.aios/state.json
+.aios/initiatives/I001_foundation/context/goal.md
+.aios/initiatives/I001_foundation/context/requirements.md
+.aios/initiatives/I001_foundation/context/spec.md
+.aios/initiatives/I001_foundation/context/examples.md
+.aios/initiatives/I001_foundation/context/acceptance.md
+.aios/initiatives/I001_foundation/workflow/workflow.md
+.aios/initiatives/I001_foundation/checks/checks.md
+.aios/initiatives/I001_foundation/tasks/task_decomposition_request.md
+.aios/initiatives/I001_foundation/state.json
 ```
 
 第一版先不要自动执行 Codex。

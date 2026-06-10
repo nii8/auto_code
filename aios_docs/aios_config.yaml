@@ -24,6 +24,10 @@ source_material_file: ""
 # 示例：稳定短视频智能剪辑流程，优先跑通 2 个短视频样例。
 initial_goal_hint: ""
 
+# 可选：当前要执行的 initiative。为空时使用顶层 .aios 兼容模式。
+# 复杂项目建议由 .aios/global_state.json 记录 active_initiative，或在本地配置中临时指定。
+active_initiative: ""
+
 # 固定策略：AIOS 工作目录固定创建在源码目录下的 .aios。
 # 不需要用户填写，程序会根据 source_code_dir 自动得到：<source_code_dir>/.aios
 aios_work_dir_policy: "source_code_dir/.aios"
@@ -34,6 +38,16 @@ first_round_policy:
   allow_read_source: true
   allow_modify_source: false
   allow_execute_tasks: false
+
+# 可选：运行前需要自动检查 / 安装的低风险 Python 包。
+# 通用内核不默认绑定任何业务依赖；具体项目需要时写入本地配置或项目冻结文件。
+runtime:
+  python_packages: []
+
+# 可选：reset 时允许清理的业务生成路径，路径相对 target_source_dir/source_code_dir。
+# 默认只重置 .aios/runs、.aios/reports、任务状态和 state.json，不删除业务源码。
+reset:
+  generated_paths: []
 
 # LLM 配置：用于后续 Python 调用大模型。不要把 API Key 写在这里，API Key 从环境变量读取。
 llm:

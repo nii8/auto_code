@@ -183,15 +183,19 @@ write_scope 用于限制 Worker 写入范围和审查任务边界，不用于并
 dependencies 保留为 DAG 顺序描述和未来扩展点。
 ```
 
-复杂项目不要把多个目标混在同一套 `goal.md` 里，应使用 initiative：
+复杂项目不要把整体项目、阶段目标和模块目标混在同一套 `goal.md` 里，应先建立项目级总览和模块 / pipeline 关系，再使用 initiative 承载阶段或模块目标：
 
 ```text
-.aios/initiatives/I001_mvp/
-.aios/initiatives/I002_login/
-.aios/initiatives/I003_admin_dashboard/
+.aios/project/project_overview.md
+.aios/project/module_map.md
+.aios/project/pipeline_map.md
+.aios/project/initiative_index.md
+.aios/initiatives/I001_foundation/
+.aios/initiatives/I002_pipeline_ingest/
+.aios/initiatives/I003_pipeline_export/
 ```
 
-每个 initiative 是一个阶段、一个需求包或一个相对独立目标。
+每个 initiative 是一个阶段、一个需求包、一个 pipeline 模块或一个相对独立目标。
 
 ## 7. 执行阶段
 

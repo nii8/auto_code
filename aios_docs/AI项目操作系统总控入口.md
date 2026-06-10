@@ -320,15 +320,15 @@ AIOS 工作目录固定为：
 .aios/
   source/      保存原始材料副本或索引
   evidence/    保存事实、痛点、需求、样例等证据草案
-  context/     保存目标、需求、规格、样例、验收标准
-  workflow/    保存流程、执行策略、人工闸门策略
-  checks/      保存确定性检查和 LLM 判断性检查规则
+  project/     保存项目总览、架构、模块图、pipeline 图、initiative 索引
+  shared/      保存跨阶段约束、编码规则、依赖策略、风险策略、证据策略
+  initiatives/ 保存各阶段 / 需求包 / pipeline 模块的独立目标和任务图
+  changes/     保存需求变更请求、影响分析和决策
   tools/       保存 AIOS 辅助 Python 脚本
-  tasks/       保存任务拆解请求、任务图、当前任务
-  runs/        保存运行日志、LLM 调用记录、Codex 调用记录
-  reports/     保存阶段报告和最终报告
-  state.json   保存状态机当前状态
+  global_state.json 保存当前 active initiative 等项目级状态
 ```
+
+单 initiative 的简单项目可以继续使用顶层 `.aios/context`、`.aios/workflow`、`.aios/checks`、`.aios/tasks`、`.aios/runs`、`.aios/reports`、`.aios/state.json` 兼容结构。复杂项目优先使用 `.aios/initiatives/<id>/`。
 
 ## 8. 第一轮必须做的事情
 
@@ -430,7 +430,7 @@ aios_docs/tools/
 llm_client.py      调用外部 LLM，例如 qwen3.6-plus
 codex_runner.py   调用 Codex CLI
 check_runner.py   运行确定性检查
-state_manager.py  维护 .aios/state.json
+state_manager.py  维护当前 workspace 的 state.json
 aios_runner.py    通用执行器：读取任务图，调用 Codex Worker，保存运行日志和状态
 ```
 
@@ -469,10 +469,11 @@ EXECUTE                   按任务图执行
 
 只有当目标、需求、规格、样例、流程、检查、验收都确认后，才生成任务拆解请求。
 
-任务拆解请求文件：
+任务拆解请求文件位于当前 workspace。复杂项目使用当前 active initiative；单 initiative 项目使用顶层兼容目录：
 
 ```text
-.aios/tasks/task_decomposition_request.md
+.aios/initiatives/<id>/tasks/task_decomposition_request.md
+# 或兼容模式：.aios/tasks/task_decomposition_request.md
 ```
 
 任务拆解请求得到用户确认后，必须转换为稳定任务图，不能直接在聊天里开始裸写代码。
@@ -480,8 +481,9 @@ EXECUTE                   按任务图执行
 任务图文件：
 
 ```text
-.aios/tasks/task_graph.md
-.aios/tasks/task_graph.json
+.aios/initiatives/<id>/tasks/task_graph.md
+.aios/initiatives/<id>/tasks/task_graph.json
+# 或兼容模式：.aios/tasks/task_graph.md / .aios/tasks/task_graph.json
 ```
 
 任务图可以由当前 AIOS 会话生成，也可以交给 Claude 等外部模型拆解。无论由谁生成，都必须写入上述两个文件。
@@ -491,8 +493,9 @@ EXECUTE                   按任务图执行
 Claude 应输出：
 
 ```text
-.aios/tasks/task_graph.md
-.aios/tasks/task_graph.json
+.aios/initiatives/<id>/tasks/task_graph.md
+.aios/initiatives/<id>/tasks/task_graph.json
+# 或兼容模式：.aios/tasks/task_graph.md / .aios/tasks/task_graph.json
 ```
 
 然后 AIOS 再读取任务图，进入执行阶段。
@@ -515,7 +518,7 @@ python3 aios.py check    # 检查任务图
 
 默认 `python3 aios.py` 会持续执行可自动推进的任务；只有失败、高风险、阻塞、超过限制或需要用户做取舍时才停下来。
 
-底层 Runner 是 `aios_docs/tools/aios_runner.py`。它应读取 `aios_config.yaml`、`.aios/state.json`、`.aios/tasks/task_graph.json` 和已冻结上下文，生成单轮 Codex Worker 提示词，调用 `codex exec` 执行，并把输出保存到 `.aios/runs/`。这让换项目时只需要改配置和重新生成 `.aios/` 文档，不需要为每个项目重写 Runner。
+底层 Runner 是 `aios_docs/tools/aios_runner.py`。它应读取 `aios_config.yaml`、项目级 `.aios/project` / `.aios/shared`、当前 active initiative 的 `state.json`、`tasks/task_graph.json` 和已冻结上下文，生成单轮 Codex Worker 提示词，调用 `codex exec` 执行，并把输出保存到当前 workspace 的 `runs/`。如果没有 active initiative，则使用顶层 `.aios` 兼容结构。这让换项目时只需要改配置和重新生成 `.aios/` 文档，不需要为每个项目重写 Runner。
 
 ## 13. 通用性要求
 
