@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from config_loader import load_config
+from project_paths import ensure_reference_dirs_readonly_boundary
 
 
 def check_paths(config: dict) -> dict:
@@ -44,6 +45,18 @@ def check_paths(config: dict) -> dict:
             "status": "pass" if valid_refs and all(path.exists() for path in valid_refs) else "fail",
             "paths": [str(path) for path in valid_refs],
             "evidence": "exists" if valid_refs and all(path.exists() for path in valid_refs) else "empty or not found",
+        })
+        try:
+            ensure_reference_dirs_readonly_boundary(config)
+            boundary_status = "pass"
+            boundary_evidence = "target_source_dir and reference_source_dirs do not contain each other"
+        except RuntimeError as exc:
+            boundary_status = "fail"
+            boundary_evidence = str(exc)
+        checks.append({
+            "name": "reference_source_dirs_readonly_boundary",
+            "status": boundary_status,
+            "evidence": boundary_evidence,
         })
     return {"checker": "paths", "checks": checks, "passed": all(c["status"] == "pass" for c in checks)}
 

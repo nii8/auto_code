@@ -189,27 +189,9 @@ while not done:
 
 例如接入 `qwen3.6-plus`，可以作为 Planner。
 
-Planner 不直接乱改文件，而是输出结构化决策：
+Planner 不直接乱改文件，而是输出结构化决策。任务图字段、`success_checks`、`expected_outputs`、`context_refs` 和证据等级的详细 schema 以 `AI项目操作系统项目设计.md` 为准。
 
-```json
-{
-  "action": "run_codex",
-  "reason": "需要实现 story_coherence.py",
-  "prompt": "请在当前项目中实现...",
-  "expected_outputs": [
-    "shared/story_coherence.py",
-    "tests/test_story_coherence.py"
-  ],
-  "success_checks": [
-    "pytest tests/test_story_coherence.py"
-  ],
-  "risk_level": "medium"
-}
-```
-
-Planner 的关键是：**必须结构化输出，不允许自由发挥。**
-
-最好用 JSON Schema 约束。
+Planner 的关键是：**必须结构化输出，不允许自由发挥**；最好用 JSON Schema 约束。
 
 ### 4. Codex Worker：执行工人
 

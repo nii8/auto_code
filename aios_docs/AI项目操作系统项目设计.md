@@ -754,30 +754,77 @@ Python / Codex / LLM 再读取：
 后续执行不再靠聊天临时理解
 ```
 
-### 5. 任务图结构
+### 5. 任务图结构和证据规范
 
-`task_graph.json` 示例：
+`task_graph.json` 是 Runner 的执行事实源。每个任务必须有可复现证据，否则不能自动执行完成。
 
 ```json
 {
-  "task_id": "T-001",
-  "title": "生成短视频 Story 模式",
-  "status": "in_progress",
-  "depth": 0,
-  "max_depth": 4,
-  "children": [
+  "tasks": [
     {
-      "task_id": "T-001-1",
-      "title": "读取项目文档并理解目标",
-      "status": "done"
-    },
-    {
-      "task_id": "T-001-2",
-      "title": "生成专业剪辑大纲",
-      "status": "pending"
+      "task_id": "T-001",
+      "title": "实现当前 initiative 的输入解析",
+      "status": "pending",
+      "dependencies": [],
+      "risk_level": "medium",
+      "write_scope": ["src/ingest/"],
+      "context_refs": [
+        ".aios/project/pipeline_map.md",
+        "context/spec.md"
+      ],
+      "success_checks": [
+        {
+          "type": "shell",
+          "command": "python3 -m pytest tests/test_ingest.py",
+          "blocking": true,
+          "evidence_level": "L3"
+        }
+      ],
+      "expected_outputs": [
+        {
+          "path": "src/ingest/parser.py",
+          "blocking": true,
+          "content_contains": ["def parse"],
+          "min_size": 100
+        }
+      ]
     }
   ]
 }
+```
+
+字段规则：
+
+```text
+task_id            必填，任务唯一 ID。
+title              必填，任务标题。
+status             pending / in_progress / done / failed / blocked / skipped_with_reason / needs_human。
+dependencies       依赖任务 ID 列表。
+risk_level         low / medium / high；high 必须进入 HUMAN_GATE。
+write_scope        Worker 允许写入的相对路径范围。
+context_refs       当前任务必须全文展开的上下文文件，优先于默认上下文预算。
+success_checks     Runner 实际执行的命令检查，推荐使用结构化对象。
+expected_outputs   产物检查；字符串只检查存在，结构化对象可检查内容、大小、sha256。
+evidence_required  默认为 true；只有纯人工决策任务才可显式设为 false。
+```
+
+证据等级：
+
+```text
+L0 自述证据：AI 报告、说明，只能辅助判断。
+L1 文件证据：产物存在，证明“有”，不证明“对”。
+L2 命令证据：Runner 实际执行命令并记录返回码、stdout、stderr。
+L3 可复现证据：可重跑命令、内容校验、大小校验、hash 校验。
+L4 独立验证证据：预定义测试、schema、golden case、端到端脚本或人工验收记录。
+```
+
+自动完成规则：
+
+```text
+1. 默认任务必须至少有一个可复现的 blocking check。
+2. Markdown 报告扫描只是 L0，不能单独让任务 done。
+3. expected_outputs 如果只是字符串路径，只算 L1；需要配合 success_checks 或结构化内容/大小/hash 校验。
+4. 证据不足时，Runner 应将任务标记 failed 或进入 HUMAN_GATE，不允许包装成完成。
 ```
 
 ### 6. 递归拆解规则
@@ -817,51 +864,57 @@ needs_human
 
 ## 十、阶段 6：状态机
 
-整个 AIOS 不能靠 LLM 自由发挥，必须有状态机。
+整个 AIOS 不能靠 LLM 自由发挥，必须有状态机。AIOS 状态机分两层，避免把“项目初始化 / 冻结流程”和“Runner 执行任务”混成一套。
 
-建议状态：
+### 1. Project Lifecycle State
 
-```text
-BOOTSTRAP
-↓
-INGEST_SOURCE
-↓
-EXTRACT_EVIDENCE
-↓
-DRAFT_CONTEXT
-↓
-HUMAN_CONFIRM_CONTEXT
-↓
-BUILD_PROJECT_FILES
-↓
-REQUEST_TASK_DECOMPOSITION
-↓
-WAIT_TASK_DECOMPOSITION
-↓
-LOAD_TASK_GRAPH
-↓
-PLAN_TASKS
-↓
-EXECUTE_TASK
-↓
-RUN_CHECKS
-↓
-REPAIR
-↓
-REVIEW
-↓
-DONE / BLOCKED / FAILED
-```
-
-注意：这里增加了三步：
+Project Lifecycle State 描述项目从原始材料到任务图就绪的过程，主要由聊天会话和初始化流程推进。
 
 ```text
-REQUEST_TASK_DECOMPOSITION
-WAIT_TASK_DECOMPOSITION
-LOAD_TASK_GRAPH
+BOOTSTRAP                  启动并读取总控入口
+CHECK_PARAMS               检查项目模式、源码目录、材料路径
+ASK_MISSING_PARAMS          参数缺失时询问用户并写入 local 配置
+INGEST_SOURCE              读取原始材料 / 旧项目 / 现有源码
+SCAN_SOURCE_CODE           扫描源码目录结构
+EXTRACT_EVIDENCE_DRAFT     生成证据草案
+DRAFT_PROJECT_STRUCTURE     生成 project_overview / module_map / pipeline_map / initiative_index 草案
+DISCUSS_ACTIVE_INITIATIVE   和用户确认当前 active initiative
+FREEZE_PROJECT_STRUCTURE    冻结项目级文件
+DISCUSS_GOAL                讨论当前 initiative 目标
+FREEZE_GOAL                 冻结 goal.md
+DISCUSS_REQUIREMENTS        讨论需求 / 非需求
+FREEZE_REQUIREMENTS         冻结 requirements.md
+DISCUSS_SPEC                讨论规格
+FREEZE_SPEC                 冻结 spec.md
+DISCUSS_EXAMPLES            讨论正反样例
+FREEZE_EXAMPLES             冻结 examples.md
+DISCUSS_WORKFLOW            讨论流程
+FREEZE_WORKFLOW             冻结 workflow.md
+DISCUSS_CHECKS              讨论检查规则
+FREEZE_CHECKS               冻结 checks.md
+DISCUSS_ACCEPTANCE          讨论验收标准
+FREEZE_ACCEPTANCE           冻结 acceptance.md
+REQUEST_TASK_DECOMPOSITION  生成任务拆解请求
+WAIT_TASK_DECOMPOSITION     等待外部规划 / 审查
+LOAD_TASK_GRAPH             加载并校验 task_graph.json
+READY_TO_EXECUTE            当前 initiative 可以交给 Runner 执行
 ```
 
-这是为了支持 Claude 等外部工具拆解任务。
+### 2. Runner Execution State
+
+Runner Execution State 描述任务图执行过程，由 `aios_docs/tools/aios_runner.py` 写入当前 workspace 的 `state.json`。
+
+```text
+READY_TO_EXECUTE            任务图已就绪，等待执行
+EXECUTE_TASK                正在执行某个任务
+CHECK                       正在检查任务结果或刚完成检查
+HUMAN_GATE                  高风险、连续失败、证据不足或需要用户决策
+DONE                        当前任务图全部完成
+BLOCKED                     仍有任务未完成，但没有可继续执行的任务
+FAILED                      Runner 自身或任务执行失败
+```
+
+代码中的 `EXECUTE_TASK`、`CHECK`、`HUMAN_GATE`、`DONE`、`BLOCKED` 属于 Runner Execution State；不要把它们和 Project Lifecycle State 混写。
 
 `state.json` 示例：
 
@@ -870,11 +923,8 @@ LOAD_TASK_GRAPH
   "phase": "EXECUTE_TASK",
   "current_task_id": "T-001-2",
   "iteration": 2,
-  "max_iterations": 5,
-  "max_depth": 4,
   "status": "running",
-  "last_result": "checker_failed",
-  "needs_human": false
+  "history": []
 }
 ```
 

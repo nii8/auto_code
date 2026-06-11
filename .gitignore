@@ -14,3 +14,6 @@ src/
 .DS_Store
 .idea/
 .vscode/
+
+# Temporary full-project export generated for manual review.
+projectall.md

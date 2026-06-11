@@ -16,10 +16,13 @@ ROOT = Path(__file__).resolve().parent
 RUNNER = ROOT / "aios_docs" / "tools" / "aios_runner.py"
 sys.path.insert(0, str(ROOT / "aios_docs" / "tools"))
 from config_loader import load_config
+from project_paths import (
+    active_initiative_id as config_active_initiative_id,
+    active_workspace_dir,
+    aios_dir,
+    source_dir,
+)
 
-TERMINAL_DONE = {"done"}
-WAITING = {"pending"}
-BLOCKING = {"failed", "blocked", "needs_human"}
 PROTECTED_RESET_PREFIXES = {
     ".aios/source",
     ".aios/evidence",
@@ -55,24 +58,16 @@ def runner_json(args: list[str]) -> tuple[int, dict[str, Any] | None, str]:
         return completed.returncode, None, text + extra
 
 
-def task_map(tasks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {str(task.get("task_id")): task for task in tasks}
-
-
-def next_task(tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
-    by_id = task_map(tasks)
-    for task in tasks:
-        if task.get("status", "pending") not in WAITING:
-            continue
-        deps = task.get("dependencies", [])
-        if all(by_id.get(str(dep), {}).get("status") == "done" for dep in deps):
-            return task
-    return None
-
-
 def get_status_data() -> dict[str, Any] | None:
     _, data, _ = runner_json(["status"])
     return data
+
+
+def upcoming_from_status(data: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not data:
+        return None
+    upcoming = data.get("summary", {}).get("upcoming")
+    return upcoming if isinstance(upcoming, dict) else None
 
 
 def load_aios_config() -> dict[str, Any]:
@@ -147,46 +142,19 @@ def resolve_command(raw: str | None) -> str:
 
 
 def source_root_from_config() -> Path:
-    config = load_aios_config()
-    value = str(config.get("target_source_dir") or config.get("source_code_dir") or "").strip()
-    if value:
-        return Path(value).expanduser().resolve()
-    raise RuntimeError("aios_config.yaml / aios_config.local.yaml 里没有 target_source_dir/source_code_dir")
+    return source_dir(load_aios_config())
 
 
 def aios_root_from_config() -> Path:
-    return source_root_from_config() / ".aios"
+    return aios_dir(load_aios_config())
 
 
-def active_initiative_id() -> str:
-    config = load_aios_config()
-    configured = str(config.get("active_initiative") or "").strip()
-    if configured:
-        return validate_initiative_id(configured)
-    global_state_path = aios_root_from_config() / "global_state.json"
-    if not global_state_path.exists():
-        return ""
-    try:
-        state = json.loads(global_state_path.read_text(encoding="utf-8"))
-    except Exception:
-        return ""
-    return validate_initiative_id(str(state.get("active_initiative") or "").strip())
-
-
-def validate_initiative_id(value: str) -> str:
-    if not value:
-        return ""
-    path = Path(value)
-    if path.is_absolute() or ".." in path.parts or "/" in value or "\\" in value:
-        raise RuntimeError("active_initiative 只能是 initiative 目录名，不能包含路径或 ..")
-    return value
+def current_active_initiative_id() -> str:
+    return config_active_initiative_id(load_aios_config())
 
 
 def active_aios_workspace() -> Path:
-    initiative_id = active_initiative_id()
-    if initiative_id:
-        return aios_root_from_config() / "initiatives" / initiative_id
-    return aios_root_from_config()
+    return active_workspace_dir(load_aios_config())
 
 
 def append_user_note(text: str) -> Path:
@@ -333,23 +301,16 @@ def cmd_status() -> int:
         print(raw or "读取状态失败。")
         return code or 1
     state = data.get("state", {})
-    tasks = data.get("tasks", [])
-    total = len(tasks)
-    done = sum(1 for task in tasks if task.get("status") in TERMINAL_DONE)
-    waiting = sum(1 for task in tasks if task.get("status", "pending") in WAITING)
-    blocked = [task for task in tasks if task.get("status") in BLOCKING]
-    current = [task for task in tasks if task.get("status") == "in_progress"]
-    upcoming = next_task(tasks)
+    summary = data.get("summary", {})
+    blocked = summary.get("blocked") or []
+    current = summary.get("current")
+    upcoming = summary.get("upcoming")
 
     print("\n📍 AIOS 状态")
-    if blocked and state.get("phase") == "DONE":
-        print("- 阶段：BLOCKED / 有任务失败或需要人工处理")
-    else:
-        print(f"- 阶段：{state.get('phase', 'unknown')} / {state.get('status', 'unknown')}")
-    print(f"- 任务：{done}/{total} 已完成，{waiting} 个等待执行")
+    print(f"- 阶段：{summary.get('phase', state.get('phase', 'unknown'))} / {summary.get('status', state.get('status', 'unknown'))}")
+    print(f"- 任务：{summary.get('done', 0)}/{summary.get('total', 0)} 已完成，{summary.get('waiting', 0)} 个等待执行")
     if current:
-        task = current[0]
-        print(f"- 正在执行：{task.get('task_id')} {task.get('title')}")
+        print(f"- 正在执行：{current.get('task_id')} {current.get('title')}")
     elif upcoming:
         print(f"- 下一步：{upcoming.get('task_id')} {upcoming.get('title')}")
     else:
@@ -371,7 +332,7 @@ def cmd_explain() -> int:
     if not data:
         print("暂时读不到状态。")
         return 1
-    blocked = [task for task in data.get("tasks", []) if task.get("status") in BLOCKING]
+    blocked = data.get("summary", {}).get("blocked") or []
     if not blocked:
         print("当前没有失败或阻塞任务。输入“状态”可以查看进度，输入“继续”可以推进。")
         return 0
@@ -395,7 +356,7 @@ def cmd_preview() -> int:
     if not ensure_project_configured():
         return 1
     data = get_status_data()
-    upcoming = next_task(data.get("tasks", [])) if data else None
+    upcoming = upcoming_from_status(data)
     completed = call_runner(["run-next", "--dry-run"], capture=True)
     path = completed.stdout.strip()
     if completed.returncode != 0:
@@ -414,7 +375,7 @@ def cmd_next() -> int:
     if not ensure_runtime_dependencies(auto_install=True):
         return 1
     data = get_status_data()
-    upcoming = next_task(data.get("tasks", [])) if data else None
+    upcoming = upcoming_from_status(data)
     if upcoming:
         print(f"🚀 开始执行一步：{upcoming.get('task_id')} {upcoming.get('title')}")
     completed = call_runner(["run-next"], capture=False)
@@ -427,7 +388,7 @@ def cmd_run() -> int:
     if not ensure_runtime_dependencies(auto_install=True):
         return 1
     data = get_status_data()
-    upcoming = next_task(data.get("tasks", [])) if data else None
+    upcoming = upcoming_from_status(data)
     if upcoming:
         print(f"🚀 AIOS 自动推进，从 {upcoming.get('task_id')} {upcoming.get('title')} 开始")
         print("遇到失败、高风险或需要你决策时会停在这里，等你输入。")
@@ -445,8 +406,7 @@ def cmd_run() -> int:
 def cmd_reset() -> int:
     if not ensure_project_configured():
         return 1
-    workspace = active_aios_workspace()
-    initiative_id = active_initiative_id()
+    initiative_id = current_active_initiative_id()
     print("🧹 重置执行现场，保留源码、原始材料和已确认的 AIOS 文档。")
     if initiative_id:
         print(f"- 当前 initiative：{initiative_id}")
@@ -466,29 +426,10 @@ def cmd_reset() -> int:
             path.unlink()
         print(f"- 已删除：{path}")
 
-    for folder in [workspace / "runs", workspace / "reports"]:
-        if folder.exists():
-            for child in folder.iterdir():
-                shutil.rmtree(child) if child.is_dir() else child.unlink()
-        folder.mkdir(parents=True, exist_ok=True)
-
-    graph_path = workspace / "tasks" / "task_graph.json"
-    graph = json.loads(graph_path.read_text(encoding="utf-8"))
-    for task in graph.get("tasks", []):
-        task["status"] = "pending"
-        for key in ["attempts", "started_at", "finished_at", "last_run", "last_error", "manual_note", "blocked_reason"]:
-            task.pop(key, None)
-    graph.get("root_task", {})["status"] = "pending"
-    graph_path.write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    state_path = workspace / "state.json"
-    state = {
-        "phase": "READY_TO_EXECUTE",
-        "status": "reset_done",
-        "iteration": 0,
-        "history": [{"phase": "READY_TO_EXECUTE", "status": "reset_done", "note": "run logs and task status cleared; source and frozen AIOS docs kept"}],
-    }
-    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    completed = call_runner(["reset"], capture=True)
+    if completed.returncode != 0:
+        print(completed.stderr.strip() or completed.stdout.strip() or "reset 失败。")
+        return completed.returncode
     print("✅ 已 reset。输入 `run` 或直接回车即可从 T1 重新开始。")
     return 0
 

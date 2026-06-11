@@ -106,6 +106,20 @@ AI 启动后必须先做参数检查：
 
 ## 3. 配套文件
 
+### 规范优先级
+
+多份文档出现重复或冲突时，按下面顺序判断：
+
+```text
+1. 用户当前明确指令
+2. AI项目操作系统项目设计.md：详细规范事实源
+3. 本总控入口：启动流程和必读索引
+4. README.md：人类快速说明
+5. 其他文档：解释背景或历史设计
+```
+
+如果冲突影响执行，先停下修正规范，不要自行猜测。
+
 启动时应读取同目录下这些文件：
 
 ```text
@@ -427,7 +441,8 @@ aios_docs/tools/
 至少包含：
 
 ```text
-llm_client.py      调用外部 LLM，例如 qwen3.6-plus
+llm_client.py      辅助调用外部 LLM；当前默认 run 流程不调用它做 Planner
+project_paths.py   统一源码目录、active initiative、workspace、state/task/runs 路径
 codex_runner.py   调用 Codex CLI
 check_runner.py   运行确定性检查
 state_manager.py  维护当前 workspace 的 state.json
@@ -438,32 +453,14 @@ API Key 不要写死在代码里，要从环境变量读取。
 
 ## 11. 状态机
 
-状态机是 AIOS 当前进行到哪一步的记录。它防止 AI 忘记流程、跳步骤、无限循环。
+状态机详细规范以 `AI项目操作系统项目设计.md` 的“阶段 6：状态机”为准。本总控入口只保留启动提醒：
 
 ```text
-BOOTSTRAP                 启动，读取总控入口
-CHECK_PARAMS              检查 aios_config.yaml 参数是否完整
-ASK_MISSING_PARAMS         参数缺失时询问用户
-INGEST_SOURCE             读取原始材料
-SCAN_SOURCE_CODE          扫描源码目录结构
-EXTRACT_EVIDENCE_DRAFT    生成证据草案
-DISCUSS_GOAL              和用户讨论目标
-FREEZE_GOAL               用户确认后冻结目标文件
-DISCUSS_REQUIREMENTS      和用户讨论需求 / 非需求
-FREEZE_REQUIREMENTS       用户确认后冻结需求文件
-DISCUSS_SPECIFICATIONS    和用户讨论规格规则
-FREEZE_SPECIFICATIONS     用户确认后冻结规格文件
-DISCUSS_EXAMPLES          和用户讨论正反样例
-FREEZE_EXAMPLES           用户确认后冻结样例文件
-DISCUSS_WORKFLOW          和用户讨论流程
-FREEZE_WORKFLOW           用户确认后冻结流程文件
-DISCUSS_CHECKS_ACCEPTANCE 和用户讨论检查与验收标准
-FREEZE_CHECKS_ACCEPTANCE  用户确认后冻结检查与验收文件
-REQUEST_TASK_DECOMPOSITION 生成任务拆解请求
-WAIT_TASK_DECOMPOSITION   等待外部模型或用户完成任务拆解
-LOAD_TASK_GRAPH           读取任务图
-EXECUTE                   按任务图执行
+Project Lifecycle State：用于项目初始化、逐层冻结、任务图加载。
+Runner Execution State：用于 Runner 执行任务、检查、阻塞、完成。
 ```
+
+不要把两层状态混写。代码中的 `EXECUTE_TASK`、`CHECK`、`HUMAN_GATE`、`DONE`、`BLOCKED` 属于 Runner Execution State。
 
 ## 12. 任务拆解
 

@@ -19,6 +19,20 @@ aios_docs/
 
 ## 二、每个文件的作用
 
+### 规范优先级
+
+多份文档重复或冲突时，按下面顺序判断：
+
+```text
+1. 用户当前明确指令
+2. AI项目操作系统项目设计.md：详细规范事实源
+3. AI项目操作系统总控入口.md：启动流程和必读索引
+4. README.md：人类快速说明
+5. 其他文档：解释背景或历史设计
+```
+
+冲突影响执行时，先停下修正规范，不要猜。
+
 ### `AI项目操作系统总控入口.md`
 
 新会话启动时让 Codex 先读这个文件。
@@ -85,7 +99,8 @@ AIOS 工作目录固定为：
 
 ```text
 config_loader.py   读取 aios_config.yaml
-llm_client.py      调用 OpenAI-compatible LLM，例如 qwen3.6-plus
+project_paths.py   统一 target/source、active initiative、workspace、state/task/runs 路径
+llm_client.py      辅助调用 OpenAI-compatible LLM；当前默认 run 流程不调用它做 Planner
 codex_runner.py    调用 codex exec
 check_runner.py    基础确定性检查
 state_manager.py   管理当前 workspace 的 state.json

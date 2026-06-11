@@ -9,6 +9,7 @@ logs, runs deterministic checks, and updates task/state files.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import json
 import select
@@ -20,10 +21,30 @@ from pathlib import Path
 from typing import Any
 
 from config_loader import load_config
+from project_paths import (
+    DEFAULT_STATE,
+    active_initiative_id,
+    active_workspace_dir,
+    aios_dir,
+    ensure_reference_dirs_readonly_boundary,
+    reference_source_dirs,
+    reports_dir,
+    runs_dir,
+    source_dir,
+    state_path,
+    task_graph_path,
+)
 
 
 TERMINAL_STATUSES = {"done", "failed", "blocked", "skipped_with_reason", "needs_human"}
 READY_STATUSES = {"pending", "failed"}
+REPRODUCIBLE_CHECKERS = {
+    "shell",
+    "expected_output_content",
+    "expected_output_sha256",
+    "expected_output_min_size",
+}
+REFERENCE_MANIFEST_MAX_FILES = 10000
 PROJECT_CONTEXT_FILES = [
     ".aios/project/project_overview.md",
     ".aios/project/architecture.md",
@@ -54,6 +75,7 @@ INITIATIVE_CONTEXT_FILES = [
     "checks/checks.md",
     "context/acceptance.md",
 ]
+DEFAULT_PROMPT_CONTEXT_BUDGET_CHARS = 60000
 
 
 def now_stamp() -> str:
@@ -103,73 +125,6 @@ def print_run_summary(tasks: list[dict[str, Any]], total_seconds: float | int | 
         print(f"- {task.get('task_id')} {task.get('title')}：{task.get('status', 'pending')}，耗时 {duration}")
 
 
-def source_dir(config: dict[str, Any]) -> Path:
-    raw = config.get("target_source_dir") or config.get("source_code_dir")
-    if not raw:
-        raise RuntimeError("target_source_dir/source_code_dir is empty in aios_config.yaml or aios_config.local.yaml")
-    return Path(str(raw)).expanduser().resolve()
-
-
-def reference_source_dirs(config: dict[str, Any]) -> list[Path]:
-    raw_dirs = config.get("reference_source_dirs") or []
-    if isinstance(raw_dirs, str):
-        raw_dirs = [raw_dirs]
-    return [Path(str(item)).expanduser().resolve() for item in raw_dirs if str(item).strip()]
-
-
-def aios_dir(config: dict[str, Any]) -> Path:
-    return source_dir(config) / ".aios"
-
-
-def active_initiative_id(config: dict[str, Any]) -> str:
-    configured = str(config.get("active_initiative") or "").strip()
-    if configured:
-        return validate_initiative_id(configured)
-    global_state_path = aios_dir(config) / "global_state.json"
-    if global_state_path.exists():
-        try:
-            state = load_json(global_state_path)
-        except Exception:
-            return ""
-        return validate_initiative_id(str(state.get("active_initiative") or "").strip())
-    return ""
-
-
-def validate_initiative_id(value: str) -> str:
-    if not value:
-        return ""
-    path = Path(value)
-    if path.is_absolute() or ".." in path.parts or "/" in value or "\\" in value:
-        raise RuntimeError("active_initiative must be a directory name, not a path")
-    return value
-
-
-def active_workspace_dir(config: dict[str, Any]) -> Path:
-    initiative_id = active_initiative_id(config)
-    if initiative_id:
-        return aios_dir(config) / "initiatives" / initiative_id
-    return aios_dir(config)
-
-
-def state_path(config: dict[str, Any]) -> Path:
-    return active_workspace_dir(config) / "state.json"
-
-
-def task_graph_path(config: dict[str, Any]) -> Path:
-    return active_workspace_dir(config) / "tasks" / "task_graph.json"
-
-
-def runs_dir(config: dict[str, Any]) -> Path:
-    path = active_workspace_dir(config) / "runs"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def reports_dir(config: dict[str, Any]) -> Path:
-    path = active_workspace_dir(config) / "reports"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -183,7 +138,7 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 def load_state(config: dict[str, Any]) -> dict[str, Any]:
     path = state_path(config)
     if not path.exists():
-        return {"phase": "BOOTSTRAP", "status": "initialized", "iteration": 0, "history": []}
+        return dict(DEFAULT_STATE)
     return load_json(path)
 
 
@@ -249,6 +204,28 @@ def has_unresolved_tasks(graph: dict[str, Any]) -> bool:
     return any(task.get("status", "pending") != "done" for task in graph.get("tasks", []))
 
 
+def status_summary(tasks: list[dict[str, Any]], state: dict[str, Any]) -> dict[str, Any]:
+    total = len(tasks)
+    done = sum(1 for task in tasks if task.get("status") == "done")
+    waiting = sum(1 for task in tasks if task.get("status", "pending") == "pending")
+    blocked = [task for task in tasks if task.get("status") in {"failed", "blocked", "needs_human"}]
+    current = next((task for task in tasks if task.get("status") == "in_progress"), None)
+    upcoming = next_ready_task({"tasks": tasks})
+    phase = state.get("phase", "unknown")
+    if blocked and phase == "DONE":
+        phase = "BLOCKED"
+    return {
+        "total": total,
+        "done": done,
+        "waiting": waiting,
+        "blocked": blocked,
+        "current": current,
+        "upcoming": upcoming,
+        "phase": phase,
+        "status": state.get("status", "unknown"),
+    }
+
+
 def read_if_exists(path: Path, max_chars: int = 12000) -> str:
     if not path.exists():
         return ""
@@ -258,12 +235,44 @@ def read_if_exists(path: Path, max_chars: int = 12000) -> str:
     return text
 
 
+def prompt_context_budget(config: dict[str, Any]) -> int:
+    raw = config.get("prompt", {}).get("context_budget_chars", DEFAULT_PROMPT_CONTEXT_BUDGET_CHARS)
+    try:
+        return max(8000, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_PROMPT_CONTEXT_BUDGET_CHARS
+
+
+def safe_context_ref(root: Path, workspace: Path, rel: str) -> Path | None:
+    rel_text = str(rel).strip().lstrip("/")
+    if not rel_text:
+        return None
+    rel_path = Path(rel_text)
+    if rel_path.is_absolute() or ".." in rel_path.parts:
+        return None
+    if rel_text.startswith(".aios/"):
+        return root / rel_path
+    return workspace / rel_path
+
+
+def append_context_file(parts: list[str], label: str, path: Path, remaining_chars: int, max_file_chars: int = 12000) -> int:
+    if remaining_chars <= 0 or not path.exists() or not path.is_file():
+        return remaining_chars
+    limit = min(max_file_chars, remaining_chars)
+    text = read_if_exists(path, max_chars=limit)
+    if not text:
+        return remaining_chars
+    parts.extend([f"\n## {label}", text])
+    return max(0, remaining_chars - len(text))
+
+
 def build_prompt(config: dict[str, Any], task: dict[str, Any]) -> str:
     root = source_dir(config)
     refs = reference_source_dirs(config)
     project_mode = str(config.get("project_mode") or "未配置")
     initiative_id = active_initiative_id(config)
     workspace = active_workspace_dir(config)
+    budget = prompt_context_budget(config)
     parts = [
         "你是 AIOS 的 Codex Worker。请只执行当前任务，不要改变项目方向。",
         "",
@@ -301,21 +310,22 @@ def build_prompt(config: dict[str, Any], task: dict[str, Any]) -> str:
         "",
         "# 项目级冻结上下文",
     ]
+    remaining = budget
+    for rel in task.get("context_refs", []) or []:
+        path = safe_context_ref(root, workspace, str(rel))
+        if path:
+            remaining = append_context_file(parts, str(rel), path, remaining)
     for rel in PROJECT_CONTEXT_FILES:
-        text = read_if_exists(root / rel)
-        if text:
-            parts.extend([f"\n## {rel}", text])
+        remaining = append_context_file(parts, rel, root / rel, remaining, max_file_chars=8000)
     parts.append("\n# 当前目标冻结上下文")
     if initiative_id:
         for rel in INITIATIVE_CONTEXT_FILES:
-            text = read_if_exists(workspace / rel)
-            if text:
-                parts.extend([f"\n## .aios/initiatives/{initiative_id}/{rel}", text])
+            remaining = append_context_file(parts, f".aios/initiatives/{initiative_id}/{rel}", workspace / rel, remaining, max_file_chars=8000)
     else:
         for rel in COMPAT_CONTEXT_FILES:
-            text = read_if_exists(root / rel)
-            if text:
-                parts.extend([f"\n## {rel}", text])
+            remaining = append_context_file(parts, rel, root / rel, remaining, max_file_chars=8000)
+    if remaining <= 0:
+        parts.append("\n[CONTEXT_BUDGET_EXHAUSTED: 其余上下文未全文展开；如任务需要，请按路径读取相关文件。]")
     return "\n".join(parts)
 
 
@@ -427,8 +437,28 @@ def clip(text: str, limit: int = 160) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def run_shell_check(config: dict[str, Any], command: str) -> dict[str, Any]:
+def run_shell_check(config: dict[str, Any], check: str | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(check, dict):
+        command = str(check.get("command") or "").strip()
+        blocking = bool(check.get("blocking", True))
+        evidence_level = str(check.get("evidence_level") or "L2")
+    else:
+        command = str(check).strip()
+        blocking = True
+        evidence_level = "L2"
     original_command = command
+    if not command:
+        return {
+            "checker": "shell",
+            "original_command": original_command,
+            "command": command,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "empty shell check command",
+            "passed": False,
+            "blocking": blocking,
+            "evidence_level": evidence_level,
+        }
     if command.startswith("python ") and not shutil_which("python") and shutil_which("python3"):
         command = "python3 " + command[len("python "):]
     completed = subprocess.run(
@@ -440,12 +470,15 @@ def run_shell_check(config: dict[str, Any], command: str) -> dict[str, Any]:
         timeout=300,
     )
     return {
+        "checker": "shell",
         "original_command": original_command,
         "command": command,
         "returncode": completed.returncode,
         "stdout": completed.stdout,
         "stderr": completed.stderr,
         "passed": completed.returncode == 0,
+        "blocking": blocking,
+        "evidence_level": evidence_level,
     }
 
 
@@ -459,30 +492,178 @@ def shutil_which(command: str) -> str | None:
 
 def run_task_checks(config: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
     checks = []
-    for command in task.get("success_checks", []) or []:
-        checks.append(run_shell_check(config, str(command)))
+    for check in task.get("success_checks", []) or []:
+        checks.append(run_shell_check(config, check))
     return checks
 
 
 def validate_expected_outputs(config: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     root = source_dir(config)
-    for rel in task.get("expected_outputs", []) or []:
-        path = root / str(rel)
+    for item in task.get("expected_outputs", []) or []:
+        if isinstance(item, dict):
+            rel = str(item.get("path") or "").strip()
+            blocking = bool(item.get("blocking", True))
+            content_contains = item.get("content_contains") or []
+            min_size = item.get("min_size")
+            expected_sha256 = str(item.get("sha256") or "").strip()
+        else:
+            rel = str(item).strip()
+            blocking = True
+            content_contains = []
+            min_size = None
+            expected_sha256 = ""
+        path = root / rel
         checks.append({
             "checker": "expected_output_exists",
             "path": str(path),
             "passed": path.exists(),
-            "blocking": True,
+            "blocking": blocking,
+            "evidence_level": "L1",
             "evidence": "exists" if path.exists() else "missing",
         })
+        if not path.exists() or path.is_dir():
+            continue
+        if isinstance(content_contains, str):
+            content_contains = [content_contains]
+        if content_contains:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            missing = [str(marker) for marker in content_contains if str(marker) not in text]
+            checks.append({
+                "checker": "expected_output_content",
+                "path": str(path),
+                "passed": not missing,
+                "blocking": blocking,
+                "evidence_level": "L2",
+                "evidence": "all content markers present" if not missing else "missing markers: " + ", ".join(missing[:5]),
+            })
+        if min_size is not None:
+            try:
+                minimum = int(min_size)
+            except (TypeError, ValueError):
+                minimum = 0
+            size = path.stat().st_size
+            checks.append({
+                "checker": "expected_output_min_size",
+                "path": str(path),
+                "passed": size >= minimum,
+                "blocking": blocking,
+                "evidence_level": "L2",
+                "evidence": f"size={size}, min_size={minimum}",
+            })
+        if expected_sha256:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            checks.append({
+                "checker": "expected_output_sha256",
+                "path": str(path),
+                "passed": digest == expected_sha256,
+                "blocking": blocking,
+                "evidence_level": "L3",
+                "evidence": f"sha256={digest}",
+            })
     return checks
+
+
+def validate_evidence_policy(task: dict[str, Any], checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if task.get("evidence_required") is False:
+        return []
+    blocking_checks = [check for check in checks if check.get("blocking", True)]
+    reproducible = [
+        check for check in blocking_checks
+        if check.get("checker") in REPRODUCIBLE_CHECKERS
+    ]
+    passed = bool(reproducible)
+    return [{
+        "checker": "evidence_policy",
+        "passed": passed,
+        "blocking": True,
+        "evidence_level": "policy",
+        "evidence": "has reproducible blocking check" if passed else "missing reproducible blocking check; AI self-report or file existence alone is not enough",
+    }]
+
+
+def task_has_reproducible_evidence_spec(task: dict[str, Any]) -> bool:
+    if task.get("evidence_required") is False:
+        return True
+    for check in task.get("success_checks", []) or []:
+        if isinstance(check, dict):
+            if check.get("blocking", True) and str(check.get("command") or "").strip():
+                return True
+        elif str(check).strip():
+            return True
+    for item in task.get("expected_outputs", []) or []:
+        if not isinstance(item, dict):
+            continue
+        if not item.get("blocking", True):
+            continue
+        if item.get("content_contains") or item.get("min_size") is not None or item.get("sha256"):
+            return True
+    return False
+
+
+def snapshot_reference_sources(config: dict[str, Any]) -> dict[str, Any]:
+    manifest: dict[str, Any] = {"roots": {}, "truncated": False, "file_count": 0}
+    for root in reference_source_dirs(config):
+        root_key = str(root)
+        files: dict[str, Any] = {}
+        if not root.exists():
+            manifest["roots"][root_key] = {"exists": False, "files": files}
+            continue
+        for path in sorted(item for item in root.rglob("*") if item.is_file()):
+            if manifest["file_count"] >= REFERENCE_MANIFEST_MAX_FILES:
+                manifest["truncated"] = True
+                break
+            try:
+                stat = path.stat()
+                rel = path.relative_to(root).as_posix()
+            except OSError:
+                continue
+            files[rel] = {
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+            manifest["file_count"] += 1
+        manifest["roots"][root_key] = {"exists": True, "files": files}
+    return manifest
+
+
+def compare_reference_snapshots(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    changes: list[str] = []
+    before_roots = before.get("roots", {})
+    after_roots = after.get("roots", {})
+    for root in sorted(set(before_roots) | set(after_roots)):
+        before_root = before_roots.get(root, {})
+        after_root = after_roots.get(root, {})
+        if before_root.get("exists") != after_root.get("exists"):
+            changes.append(f"root existence changed: {root}")
+            continue
+        before_files = before_root.get("files", {})
+        after_files = after_root.get("files", {})
+        for rel in sorted(set(before_files) | set(after_files)):
+            if before_files.get(rel) != after_files.get(rel):
+                changes.append(f"{root}/{rel}")
+                if len(changes) >= 20:
+                    return {"changed": True, "changes": changes, "truncated": before.get("truncated") or after.get("truncated")}
+    return {"changed": bool(changes), "changes": changes, "truncated": before.get("truncated") or after.get("truncated")}
+
+
+def reference_integrity_check(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    comparison = compare_reference_snapshots(before, after)
+    changed = bool(comparison.get("changed"))
+    return {
+        "checker": "reference_source_integrity",
+        "passed": not changed,
+        "blocking": True,
+        "evidence_level": "L3",
+        "evidence": "reference_source_dirs unchanged" if not changed else "reference_source_dirs changed: " + "; ".join(comparison.get("changes", [])[:5]),
+        "details": comparison,
+    }
 
 
 def validate_report_content(config: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
-    for rel in task.get("expected_outputs", []) or []:
-        rel_text = str(rel)
+    for item in task.get("expected_outputs", []) or []:
+        rel_text = str(item.get("path") if isinstance(item, dict) else item).strip()
         if not rel_text.endswith(".md"):
             continue
         path = source_dir(config) / rel_text
@@ -504,6 +685,7 @@ def validate_report_content(config: dict[str, Any], task: dict[str, Any]) -> lis
             "path": str(path),
             "passed": passed,
             "blocking": True,
+            "evidence_level": "L0",
             "evidence": evidence,
         })
     return checks
@@ -528,6 +710,7 @@ def write_run_artifacts(config: dict[str, Any], task: dict[str, Any], prompt: st
 
 
 def run_next(config: dict[str, Any], dry_run: bool = False) -> int:
+    ensure_reference_dirs_readonly_boundary(config)
     graph = load_task_graph(config)
     task = next_ready_task(graph)
     if task is None:
@@ -563,14 +746,19 @@ def run_next(config: dict[str, Any], dry_run: bool = False) -> int:
     task["attempts"] = attempts
     save_task_graph(config, graph)
 
+    reference_before = snapshot_reference_sources(config)
     result = run_codex(config, prompt)
+    reference_after = snapshot_reference_sources(config)
     checks = []
+    checks.append(reference_integrity_check(reference_before, reference_after))
     if result["returncode"] == 0:
         checks.extend(run_task_checks(config, task))
         checks.extend(validate_expected_outputs(config, task))
         checks.extend(validate_report_content(config, task))
+        checks.extend(validate_evidence_policy(task, checks))
     artifact_path = write_run_artifacts(config, task, prompt, result, checks)
-    checks_passed = all(check.get("passed") for check in checks) if checks else True
+    blocking_checks = [check for check in checks if check.get("blocking", True)]
+    checks_passed = all(check.get("passed") for check in blocking_checks) if blocking_checks else False
 
     graph = load_task_graph(config)
     tasks = task_by_id(graph)
@@ -655,9 +843,11 @@ def run_auto(config: dict[str, Any], max_steps: int | None = None) -> int:
 
 
 def show_status(config: dict[str, Any]) -> int:
+    ensure_reference_dirs_readonly_boundary(config)
     graph = load_task_graph(config)
     state = load_state(config)
-    print(json.dumps({"state": state, "tasks": graph.get("tasks", [])}, ensure_ascii=False, indent=2))
+    tasks = graph.get("tasks", [])
+    print(json.dumps({"state": state, "tasks": tasks, "summary": status_summary(tasks, state)}, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -665,6 +855,10 @@ def validate(config: dict[str, Any]) -> int:
     graph = load_task_graph(config)
     ids = set()
     errors = []
+    try:
+        ensure_reference_dirs_readonly_boundary(config)
+    except RuntimeError as exc:
+        errors.append(str(exc))
     for task in graph.get("tasks", []):
         task_id = task.get("task_id")
         if not task_id:
@@ -673,6 +867,10 @@ def validate(config: dict[str, Any]) -> int:
         if task_id in ids:
             errors.append(f"duplicate task_id: {task_id}")
         ids.add(task_id)
+        if not task_has_reproducible_evidence_spec(task):
+            errors.append(
+                f"task {task_id} lacks reproducible blocking evidence: add success_checks or structured expected_outputs with content_contains/min_size/sha256"
+            )
     for task in graph.get("tasks", []):
         for dep in task.get("dependencies", []):
             if dep not in ids:
@@ -680,6 +878,37 @@ def validate(config: dict[str, Any]) -> int:
     result = {"valid": not errors, "errors": errors, "task_count": len(graph.get("tasks", []))}
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if not errors else 1
+
+
+def reset_execution_state(config: dict[str, Any]) -> int:
+    workspace = active_workspace_dir(config)
+    graph = load_task_graph(config)
+    for task in graph.get("tasks", []):
+        task["status"] = "pending"
+        for key in ["attempts", "started_at", "finished_at", "last_run", "last_error", "manual_note", "blocked_reason", "duration_seconds"]:
+            task.pop(key, None)
+    graph.get("root_task", {})["status"] = "pending"
+    save_task_graph(config, graph)
+
+    for folder in [runs_dir(config), reports_dir(config)]:
+        if folder.exists():
+            for child in folder.iterdir():
+                if child.is_dir():
+                    import shutil
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        folder.mkdir(parents=True, exist_ok=True)
+
+    state = {
+        "phase": "READY_TO_EXECUTE",
+        "status": "reset_done",
+        "iteration": 0,
+        "history": [{"time": now_iso(), "phase": "READY_TO_EXECUTE", "status": "reset_done", "note": "run logs and task status cleared; source and frozen AIOS docs kept"}],
+    }
+    save_state(config, state)
+    print(json.dumps({"workspace": str(workspace), "status": "reset_done"}, ensure_ascii=False, indent=2))
+    return 0
 
 
 def main() -> None:
@@ -692,6 +921,7 @@ def main() -> None:
     run_next_parser.add_argument("--dry-run", action="store_true", help="Only write the Codex prompt")
     sub.add_parser("status", help="Show state and tasks")
     sub.add_parser("validate", help="Validate task graph")
+    sub.add_parser("reset", help="Reset run logs, reports, task statuses, and active workspace state")
     args = parser.parse_args()
 
     config = load_config(args.config) if args.config else load_config()
@@ -703,6 +933,8 @@ def main() -> None:
         raise SystemExit(show_status(config))
     if args.cmd == "validate":
         raise SystemExit(validate(config))
+    if args.cmd == "reset":
+        raise SystemExit(reset_execution_state(config))
 
 
 if __name__ == "__main__":
