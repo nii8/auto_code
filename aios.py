@@ -126,6 +126,10 @@ def resolve_command(raw: str | None) -> str:
         return "check"
     if text in {"doctor", "诊断", "环境", "环境检查", "检查环境"}:
         return "doctor"
+    if text in {"context", "上下文", "上下文检查", "prompt", "提示词", "提示词检查"}:
+        return "context"
+    if text in {"clean", "清洗", "清洗材料", "清洗源码", "预处理", "索引"}:
+        return "clean"
     if text in {"status", "状态", "进度", "看看", "到哪了", "现在到哪了"}:
         return "status"
     if text in {"preview", "预览", "看看下一步", "下一步做什么"}:
@@ -231,10 +235,132 @@ def print_help() -> None:
     print("  next                  只执行一个任务")
     print("  check                 检查任务图")
     print("  doctor                检查本地运行环境")
+    print("  context               检查启动材料和 prompt 上下文大小")
+    print("  clean                 清洗聊天记录和源码索引，生成新会话启动文件")
     print("  reset                 清掉运行日志和任务状态，从任务图重跑")
     print("  exit                  离开 AIOS")
     print("  其他自然语言           记录为用户备注，然后你可以输入 run")
-    print("\n中文别名仍可用：继续、状态、预览、单步、检查、诊断、重置、退出。")
+    print("\n中文别名仍可用：继续、状态、预览、单步、检查、诊断、上下文、清洗、重置、退出。")
+
+
+def format_chars(value: int | float | None) -> str:
+    if value is None:
+        return "0"
+    number = int(value)
+    if number >= 1_000_000:
+        return f"{number / 1_000_000:.1f}M"
+    if number >= 1000:
+        return f"{number / 1000:.1f}K"
+    return str(number)
+
+
+def print_largest_entries(title: str, entries: list[dict[str, Any]], key: str = "chars", limit: int = 5) -> None:
+    filtered = [item for item in entries if int(item.get(key, 0) or 0) > 0]
+    if not filtered:
+        return
+    print(title)
+    for item in sorted(filtered, key=lambda data: int(data.get(key, 0) or 0), reverse=True)[:limit]:
+        label = item.get("label") or item.get("path") or "unknown"
+        tokens = item.get("estimated_tokens")
+        token_text = f"，约 {format_chars(tokens)} tokens" if tokens is not None else ""
+        print(f"  - {label}：{format_chars(item.get(key, 0))} 字符{token_text}")
+
+
+def cmd_context() -> int:
+    if not ensure_project_configured():
+        return 1
+    code, data, raw = runner_json(["context"])
+    if not data:
+        print(raw or "上下文检查失败。")
+        return code or 1
+    severity = data.get("startup_severity", "ok")
+    icon = "🚨" if severity == "danger" else "⚠️" if severity == "warning" else "📏"
+    print(f"\n{icon} AIOS 上下文体检")
+    print(f"- Worker prompt 预算：{format_chars(data.get('prompt_budget_chars'))} 字符")
+    print(f"- 启动候选上下文：{format_chars(data.get('total_startup_candidate_chars'))} 字符，约 {format_chars(data.get('estimated_startup_tokens'))} tokens")
+    print(f"- 启动必读文档：{format_chars(data.get('startup_required_docs_chars'))} 字符")
+    material = data.get("source_material") or {}
+    if material:
+        exists = "存在" if material.get("exists") else "不存在"
+        print(f"- 原始材料/聊天记录：{format_chars(material.get('chars'))} 字符，{exists}，路径：{material.get('path')}")
+    print(f"- 已冻结项目上下文：{format_chars(data.get('project_context_chars'))} 字符")
+    source_tree = data.get("source_tree") or {}
+    print(f"- 源码树：{source_tree.get('file_count', 0)} 个文件，{format_chars(source_tree.get('total_bytes'))} bytes（只统计，不默认全文读取）")
+    gate = data.get("planning_gate") or {}
+    gate_status = gate.get("status", "unknown")
+    gate_icon = "🚫" if gate_status == "blocked" else "⚠️" if gate_status == "warning" else "✅"
+    print(f"\n{gate_icon} 初始化/规划上下文闸门：{gate_status}")
+    print(f"- 规划预算：{format_chars(gate.get('planning_context_budget_chars'))} 字符")
+    print(f"- 规划候选上下文：{format_chars(gate.get('candidate_chars'))} 字符，约 {format_chars(gate.get('estimated_candidate_tokens'))} tokens")
+    material_read = "是" if gate.get('full_material_read_allowed') else "否"
+    if material and not material.get("exists"):
+        material_read = "否（文件不存在）"
+    print(f"- 允许全文读取原始材料：{material_read}")
+    print(f"- 允许全文读取源码：{'是' if gate.get('full_source_read_allowed') else '否'}")
+    print(f"- 允许继续冻结模块目标：{'是' if gate.get('module_freeze_allowed') else '否'}")
+    reasons = gate.get("reasons") or []
+    if reasons:
+        print("- 触发原因：")
+        for reason in reasons:
+            print(f"  - {reason}")
+    actions = gate.get("required_actions") or []
+    if actions:
+        print("- 必须动作：")
+        for action in actions:
+            print(f"  - {action}")
+    warnings = data.get("warnings") or []
+    if warnings:
+        print("\n需要注意：")
+        for warning in warnings:
+            print(f"- {warning}")
+    print_largest_entries("\n最大的 AIOS Markdown：", data.get("all_aios_markdown") or [])
+    print_largest_entries("\n最大的项目上下文/材料：", data.get("project_context_files") or [])
+    largest_source = source_tree.get("largest_files") or []
+    if largest_source:
+        print("\n源码最大文件（未全文加入 prompt）：")
+        for item in largest_source[:5]:
+            print(f"  - {item.get('path')}：{format_chars(item.get('bytes'))} bytes")
+    print("\n处理原则：")
+    for item in data.get("policy") or []:
+        print(f"- {item}")
+    safe_order = (data.get("planning_gate") or {}).get("safe_initialization_order") or []
+    if safe_order:
+        print("\n初始化安全顺序：")
+        for index, item in enumerate(safe_order, start=1):
+            print(f"{index}. {item}")
+    return code
+
+
+def cmd_clean() -> int:
+    if not ensure_project_configured():
+        return 1
+    print("\n🧹 AIOS 初始化清洗")
+    print("- 不修改源码。")
+    print("- 不修改原始聊天记录/材料。")
+    print("- 只在目标项目 `.aios/ingest` 和 `.aios/source` 下生成额外文件。")
+    completed = call_runner(["clean"], capture=True)
+    output = completed.stdout.strip()
+    if completed.returncode != 0:
+        print(completed.stderr.strip() or output or "清洗失败。")
+        return completed.returncode
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        print(output)
+        return completed.returncode
+    print("✅ 清洗完成。")
+    print(f"- 源码已修改：{'是' if data.get('source_modified') else '否'}")
+    print(f"- 原始材料已修改：{'是' if data.get('source_material_modified') else '否'}")
+    print(f"- 新会话启动说明：{data.get('bootstrap_readme')}")
+    generated = data.get("generated_files") or []
+    print(f"- 生成文件：{len(generated)} 个")
+    for item in generated[:12]:
+        print(f"  - {item}")
+    if len(generated) > 12:
+        print(f"  - ... 还有 {len(generated) - 12} 个")
+    print("\n⚠️ 建议现在退出当前 Codex 会话，然后重新开始。")
+    print("新会话只读取 `bootstrap_readme.md` 里列出的清洗产物，不要再读取原始大聊天记录或全文源码。")
+    return completed.returncode
 
 
 def cmd_doctor() -> int:
@@ -298,6 +424,12 @@ def cmd_status() -> int:
         return 1
     code, data, raw = runner_json(["status"])
     if not data:
+        if "task graph not found" in (raw or ""):
+            print("\n📍 AIOS 状态")
+            print("- 当前还没有生成 task_graph.json。")
+            print("- 下一步：先完成项目级规划、选择 active initiative，并确认任务图。")
+            print("- 任务图生成后，再输入 `run` 执行。")
+            return code or 1
         print(raw or "读取状态失败。")
         return code or 1
     state = data.get("state", {})
@@ -358,10 +490,14 @@ def cmd_preview() -> int:
     data = get_status_data()
     upcoming = upcoming_from_status(data)
     completed = call_runner(["run-next", "--dry-run"], capture=True)
-    path = completed.stdout.strip()
+    output = completed.stdout.strip()
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    path = lines[-1] if lines else ""
     if completed.returncode != 0:
-        print(completed.stderr.strip() or path or "预览失败。")
+        print(completed.stderr.strip() or output or "预览失败。")
         return completed.returncode
+    if output:
+        print(output)
     if upcoming:
         print(f"👀 下一步：{upcoming.get('task_id')} {upcoming.get('title')}")
     print(f"- Codex 提示词已生成：{path}")
@@ -445,6 +581,10 @@ def handle_input(raw: str, interactive: bool) -> int:
         return cmd_check()
     if command == "doctor":
         return cmd_doctor()
+    if command == "context":
+        return cmd_context()
+    if command == "clean":
+        return cmd_clean()
     if command == "status":
         return cmd_status()
     if command == "explain":
@@ -465,6 +605,8 @@ def handle_input(raw: str, interactive: bool) -> int:
 
 def repl() -> int:
     print("AIOS 已启动。输入 `help` 查看命令；直接回车或输入 `run` 会自动推进。")
+    if not missing_config_fields():
+        cmd_context()
     cmd_status()
     while True:
         try:

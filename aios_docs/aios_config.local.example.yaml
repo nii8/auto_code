@@ -33,5 +33,16 @@ reset:
   generated_paths: []
 
 # 可选：限制 Worker prompt 中全文展开的上下文总量。
+# Runner 会打印 prompt 大小、估算 token、预算使用率和截断/跳过文件。
 prompt:
   context_budget_chars: 60000
+
+# 初始化/规划预算：用于扫描源码、读取聊天记录、生成项目级规划和冻结模块目标之前的上下文闸门。
+# 超过预算时应先摘要、索引、拆 initiative，不能继续全文读取和冻结模块。
+planning:
+  context_budget_chars: 120000
+
+# 清洗阶段：路径绑定后先生成 .aios/ingest 和 .aios/source，再提示重启新会话。
+# 清洗只能新增 .aios 文件，不能修改源码或原始聊天记录。
+cleaning:
+  restart_required: true

@@ -802,7 +802,7 @@ status             pending / in_progress / done / failed / blocked / skipped_wit
 dependencies       依赖任务 ID 列表。
 risk_level         low / medium / high；high 必须进入 HUMAN_GATE。
 write_scope        Worker 允许写入的相对路径范围。
-context_refs       当前任务必须全文展开的上下文文件，优先于默认上下文预算。
+context_refs       当前任务优先展开的上下文文件，仍受 prompt 预算约束；放不下时必须截断、摘要或拆小任务。
 success_checks     Runner 实际执行的命令检查，推荐使用结构化对象。
 expected_outputs   产物检查；字符串只检查存在，结构化对象可检查内容、大小、sha256。
 evidence_required  默认为 true；只有纯人工决策任务才可显式设为 false。
@@ -826,6 +826,32 @@ L4 独立验证证据：预定义测试、schema、golden case、端到端脚本
 3. expected_outputs 如果只是字符串路径，只算 L1；需要配合 success_checks 或结构化内容/大小/hash 校验。
 4. 证据不足时，Runner 应将任务标记 failed 或进入 HUMAN_GATE，不允许包装成完成。
 ```
+
+### 5.1 Prompt 上下文预算和可见性
+
+复杂项目不能默认把所有源码、所有 Markdown 和完整聊天记录塞进同一轮 prompt。Runner 每次构造 Worker prompt 时必须生成上下文报告：
+
+```text
+prompt 总字符数
+估算 token 数
+context_budget_chars 预算和使用率
+展开了哪些文件
+哪些文件被截断
+哪些文件因为预算耗尽或不存在被跳过
+最大的上下文文件 Top N
+```
+
+初始化、项目级规划、模块拆分和逐层冻结发生在 Runner 执行之前，也必须受上下文闸门控制。读取聊天记录全文、扫描源码细节、生成 project_overview/module_map/pipeline_map/initiative_index、冻结某个模块目标之前，都应先运行上下文体检，统计启动必读文档、source_material_file、已冻结项目上下文和源码树大小。路径绑定后必须先执行清洗阶段：只读原始材料和源码树，生成 `.aios/ingest` 与 `.aios/source` 额外文件，不修改源码、不修改原始材料。清洗完成后应提示用户退出当前 Codex，重新开启新会话；新会话只读取清洗产物再规划。
+
+闸门结果：
+
+```text
+ok       可以继续规划，但源码仍默认只读目录树和关键入口。
+warning  可以继续讨论，但必须缩小读取范围，优先使用摘要、索引和当前 initiative。
+blocked  不允许冻结项目目标、模块目标或 initiative 目标；必须先清洗、摘要、索引、需求抽取、源码目录索引或拆 initiative。
+```
+
+超过警戒线时，不要让初始化阶段的 AI 在巨大上下文里自行搜索，更不要把“读了很多材料”当作可以冻结目标的证据。
 
 ### 6. 递归拆解规则
 

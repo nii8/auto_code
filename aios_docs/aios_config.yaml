@@ -50,9 +50,20 @@ reset:
   generated_paths: []
 
 # Prompt 构造预算：Runner 会优先放入任务 context_refs，再放项目级和当前 initiative 上下文。
+# 每次执行前会打印 prompt 字符数、估算 token、预算使用率、截断/跳过文件。
 # 超过预算时不再继续全文展开，避免上下文过大干扰当前任务。
 prompt:
   context_budget_chars: 60000
+
+# 初始化/规划预算：用于扫描源码、读取聊天记录、生成项目级规划和冻结模块目标之前的上下文闸门。
+# 超过预算时应先摘要、索引、拆 initiative，不能继续全文读取和冻结模块。
+planning:
+  context_budget_chars: 120000
+
+# 清洗阶段：路径绑定后先生成 .aios/ingest 和 .aios/source，再提示重启新会话。
+# 清洗只能新增 .aios 文件，不能修改源码或原始聊天记录。
+cleaning:
+  restart_required: true
 
 # LLM 配置：用于后续 Python 调用大模型。不要把 API Key 写在这里，API Key 从环境变量读取。
 llm:
